@@ -18,6 +18,9 @@ import androidx.core.app.ActivityCompat
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.util.UUID
 
 /**
@@ -25,7 +28,9 @@ import java.util.UUID
  * Gestiona el ciclo de vida de la actividad, los permisos y la conexión BLE.
  */
 class MainActivity : ComponentActivity() {
-    
+
+    var temperatura by mutableStateOf("Sin datos")
+
     // Objeto que representa el adaptador Bluetooth del dispositivo (el hardware)
     private var bluetoothAdapter: BluetoothAdapter? = null
     // Escáner para buscar dispositivos BLE cercanos
@@ -52,7 +57,7 @@ class MainActivity : ComponentActivity() {
         // Define la interfaz visual usando Compose
         setContent {
             SynCarTheme {
-                Greeting("SynCar")
+                Text("Temperatura: $temperatura")
             }
         }
 
@@ -202,6 +207,7 @@ class MainActivity : ComponentActivity() {
             val text = String(data ?: byteArrayOf())
 
             Log.d("BLE", "Dato recibido: $text")
+            temperatura = text
         }
     }
 }
