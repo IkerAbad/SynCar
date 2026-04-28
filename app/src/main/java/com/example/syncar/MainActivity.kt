@@ -31,6 +31,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.data.Entry
+import com.github.mikephil.charting.data.LineData
+import com.github.mikephil.charting.data.LineDataSet
 import java.util.Locale
 import java.util.UUID
 
@@ -95,6 +100,17 @@ class MainActivity : ComponentActivity() {
                     SensorCard("🌡 Temperatura", tempActual, "°C", Color(0xFFE53935))
                     SensorCard("💧 Humedad", humActual, "%", Color(0xFF1E88E5))
                     SensorCard("📏 Distancia", distActual, "cm", Color(0xFF43A047))
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Evolución de temperatura",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    
+                    // Gráfica de evolución
+                    GraficaTemperatura(obtenerDatosTemp())
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -279,6 +295,73 @@ class MainActivity : ComponentActivity() {
         }
         cursor.close()
     }
+
+    /**
+     * Obtiene los últimos 20 valores de temperatura para la gráfica.
+     */
+    fun obtenerDatosTemp(): List<Float> {
+        val lista = mutableListOf<Float>()
+        val db = dbHelper.readableDatabase
+
+        val cursor = db.rawQuery(
+            "SELECT valor FROM datos WHERE tipo='TEMP' ORDER BY id DESC LIMIT 20",
+            null
+        )
+
+        while (cursor.moveToNext()) {
+            val valorString = cursor.getString(0)
+            val valor = valorString.replace(",", ".").toFloatOrNull()
+            if (valor != null) lista.add(valor)
+        }
+
+        cursor.close()
+        return lista.reversed()
+    }
+}
+
+/**
+ * Componente visual para mostrar la evolución de la temperatura.
+ */
+@Composable
+fun GraficaTemperatura(datos: List<Float>) {
+    AndroidView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(200.dp),
+        factory = { context ->
+            LineChart(context).apply {
+                description.isEnabled = false
+                setTouchEnabled(true)
+                setPinchZoom(true)
+                legend.isEnabled = true
+                
+                // Configuración de los ejes
+                xAxis.setDrawGridLines(false)
+                xAxis.setDrawLabels(false)
+                axisRight.isEnabled = false
+            }
+        },
+        update = { chart ->
+            val entries = datos.mapIndexed { index, value ->
+                Entry(index.toFloat(), value)
+            }
+
+            val dataSet = LineDataSet(entries, "Temperatura (°C)").apply {
+                color = android.graphics.Color.RED
+                setCircleColor(android.graphics.Color.RED)
+                lineWidth = 2f
+                circleRadius = 3f
+                setDrawCircleHole(false)
+                valueTextSize = 0f // No mostramos el texto del valor en cada punto para no saturar
+                setDrawFilled(true)
+                fillColor = android.graphics.Color.RED
+                fillAlpha = 30
+            }
+
+            chart.data = LineData(dataSet)
+            chart.invalidate() // Refrescar la gráfica
+        }
+    )
 }
 
 /**
