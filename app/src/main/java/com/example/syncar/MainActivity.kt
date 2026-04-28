@@ -1,6 +1,5 @@
 package com.example.syncar
 
-// --- IMPORTACIONES ---
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -8,406 +7,307 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.Text
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import com.example.syncar.ui.theme.SynCarTheme
-import androidx.core.app.ActivityCompat
-
-// Librerías necesarias para la comunicación Bluetooth Low Energy (BLE)
-import android.bluetooth.*
-import android.bluetooth.le.*
-import android.util.Log
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.ActivityCompat
+import android.bluetooth.*
+import android.bluetooth.le.*
+import android.util.Log
+import com.example.syncar.ui.theme.SynCarTheme
 import com.github.mikephil.charting.charts.LineChart
-import com.github.mikephil.charting.data.Entry
-import com.github.mikephil.charting.data.LineData
-import com.github.mikephil.charting.data.LineDataSet
-import java.util.Locale
-import java.util.UUID
+import com.github.mikephil.charting.data.*
+import java.util.*
 
 /**
- * MainActivity: Gestiona el ciclo de vida de la app, los permisos y la comunicación BLE.
+ * MainActivity: Gestión optimizada para telemetría en tiempo real.
  */
 class MainActivity : ComponentActivity() {
-    // dbHelper: Nos permite interactuar con la base de datos SQLite local.
-    lateinit var dbHelper: DatabaseHelper
-    
-    // Estados para el Dashboard (Valores actuales)
-    var tempActual by mutableStateOf("--")
-    var humActual by mutableStateOf("--")
-    var distActual by mutableStateOf("--")
+    private lateinit var dbHelper: DatabaseHelper
 
-    // bluetoothAdapter: Interfaz principal para el hardware de Bluetooth del móvil.
+    // --- ESTADOS REACTIVOS (SINGLE SOURCE OF TRUTH) ---
+    // Usamos 'val' para que la instancia de la lista nunca cambie, solo su contenido.
+    private val listaHistorial = mutableStateListOf<String>()
+    private val listaPuntosGrafica = mutableStateListOf<Float>()
+    
+    // Estados simples para las tarjetas superiores
+    private var tempActual by mutableStateOf("--")
+    private var humActual by mutableStateOf("--")
+    private var distActual by mutableStateOf("--")
+
     private var bluetoothAdapter: BluetoothAdapter? = null
-    // scanner: Objeto especializado en buscar señales de dispositivos BLE.
     private var scanner: BluetoothLeScanner? = null
 
-    // listaDatos: Lista observable que almacena los mensajes para mostrar en pantalla.
-    var listaDatos = mutableStateListOf<String>()
-
-    /**
-     * Gestor de permisos (ActivityResult): Maneja la respuesta del usuario cuando pedimos acceso.
-     * Si acepta, iniciamos el escaneo automáticamente.
-     */
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            val allGranted = permissions.all { it.value }
-            if (allGranted) {
-                startBleScan()
-            } else {
-                Log.e("BLE", "Permisos denegados. El escaneo no puede continuar.")
-            }
+            if (permissions.all { it.value }) startBleScan()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("BLE", "Iniciando Aplicación SynCar...")
-
-        // Inicializamos la base de datos y cargamos el historial previo.
         dbHelper = DatabaseHelper(this)
-        cargarDatos()
-        
-        // --- INTERFAZ DE USUARIO (Dashboard con Tarjetas) ---
+
+        // Carga inicial desde SQLite
+        inicializarDatosDesdeDB()
+
         setContent {
             SynCarTheme {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "Dashboard SynCar",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp)
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    DashboardScreen(
+                        temp = tempActual,
+                        hum = humActual,
+                        dist = distActual,
+                        puntos = listaPuntosGrafica, 
+                        historial = listaHistorial
                     )
-
-                    // 🔥 TARJETAS PRINCIPALES
-                    SensorCard("🌡 Temperatura", tempActual, "°C", Color(0xFFE53935))
-                    SensorCard("💧 Humedad", humActual, "%", Color(0xFF1E88E5))
-                    SensorCard("📏 Distancia", distActual, "cm", Color(0xFF43A047))
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Evolución de temperatura",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                    
-                    // Gráfica de evolución
-                    GraficaTemperatura(obtenerDatosTemp())
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Text(
-                        text = "Historial reciente",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Lista de historial con scroll opcional (simplificado)
-                    Column {
-                        listaDatos.take(5).forEach {
-                            Text(
-                                text = it,
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(vertical = 2.dp)
-                            )
-                        }
-                    }
                 }
             }
         }
 
-        // Obtención de los servicios de Bluetooth del sistema.
+        configurarBluetooth()
+    }
+
+    private fun inicializarDatosDesdeDB() {
+        // Cargar historial (últimos 10 para que sea visualmente fijo y limpio)
+        val db = dbHelper.readableDatabase
+        val cHist = db.rawQuery("SELECT tipo, valor FROM datos ORDER BY id DESC LIMIT 10", null)
+        while (cHist.moveToNext()) {
+            listaHistorial.add("${cHist.getString(0)}: ${cHist.getString(1)}")
+        }
+        cHist.close()
+
+        // Cargar gráfica (últimos 20 de temperatura)
+        val cGraph = db.rawQuery("SELECT valor FROM datos WHERE tipo='TEMP' ORDER BY id DESC LIMIT 20", null)
+        val tempPuntos = mutableListOf<Float>()
+        while (cGraph.moveToNext()) {
+            cGraph.getString(0).replace(",", ".").toFloatOrNull()?.let { tempPuntos.add(it) }
+        }
+        cGraph.close()
+        listaPuntosGrafica.addAll(tempPuntos.reversed())
+    }
+
+    private fun configurarBluetooth() {
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
         scanner = bluetoothAdapter?.bluetoothLeScanner
-
-        // Comprobación de permisos inicial antes de arrancar el proceso.
-        checkPermissionsAndStartScan()
+        checkPermissions()
     }
 
-    /**
-     * Verifica permisos según la versión de Android y solicita los que falten.
-     */
-    private fun checkPermissionsAndStartScan() {
-        val permissions = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+ requiere permisos específicos de Escaneo y Conexión.
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun checkPermissions() {
+        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            // Versiones anteriores dependen del permiso de localización fina.
-            permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-
-        if (permissions.all { ActivityCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
+        if (perms.all { ActivityCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
             startBleScan()
         } else {
-            requestPermissionLauncher.launch(permissions.toTypedArray())
+            requestPermissionLauncher.launch(perms)
         }
     }
 
-    /**
-     * Inicia el proceso de búsqueda (Scan) de dispositivos BLE.
-     */
     private fun startBleScan() {
-        // Validación de seguridad para evitar errores de ejecución por falta de permisos.
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            return
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            scanner?.startScan(scanCallback)
         }
-        Log.d("BLE", "Escaneando dispositivos...")
-        scanner?.startScan(scanCallback)
     }
 
-    /**
-     * Callback de Escaneo: Se dispara por cada dispositivo detectado.
-     */
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                return
-            }
-            
-            // Si encontramos el dispositivo con el nombre configurado ("SynCar").
             if (result.device.name == "SynCar") {
-                Log.d("BLE", "Dispositivo SynCar encontrado. Deteniendo escaneo y conectando...")
-                
-                // Detenemos el escaneo para ahorrar batería.
-                scanner?.stopScan(this)
-
-                // Establecemos la conexión GATT.
+                if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                    scanner?.stopScan(this)
+                }
                 result.device.connectGatt(this@MainActivity, false, gattCallback)
             }
         }
     }
 
-    /**
-     * Callback GATT: Gestiona la conexión y el intercambio de datos.
-     */
     private val gattCallback = object : BluetoothGattCallback() {
-        
-        // Se dispara al conectar o desconectar del dispositivo.
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.d("BLE", "Conectado al servidor. Descubriendo servicios...")
                 if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                     gatt.discoverServices()
                 }
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.d("BLE", "Desconectado del servidor.")
             }
         }
 
-        // Se dispara cuando el dispositivo reporta sus "carpetas" (servicios) disponibles.
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                // Buscamos el Servicio y Característica por sus identificadores únicos (UUID).
-                val service = gatt.getService(UUID.fromString("12345678-1234-5678-1234-56789abcdef0"))
-                val characteristic = service?.getCharacteristic(UUID.fromString("12345678-1234-5678-1234-56789abcdef1"))
+            val service = gatt.getService(UUID.fromString("12345678-1234-5678-1234-56789abcdef0"))
+            val characteristic = service?.getCharacteristic(UUID.fromString("12345678-1234-5678-1234-56789abcdef1"))
 
-                characteristic?.let {
-                    // Habilitamos las notificaciones para recibir datos de forma automática.
-                    if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                        gatt.setCharacteristicNotification(it, true)
-                    }
+            if (characteristic != null && (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S)) {
+                // 1. Activar notificaciones localmente
+                gatt.setCharacteristicNotification(characteristic, true)
+
+                // 2. Activar notificaciones en el PERIFÉRICO (Pico 2W) escribiendo en el descriptor CCCD
+                val descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+                descriptor?.let {
+                    it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    gatt.writeDescriptor(it)
+                    Log.d("BLE_DEBUG", "Descriptor CCCD escrito. Notificaciones activadas.")
                 }
             }
         }
 
-        /**
-         * Se dispara CADA VEZ que el dispositivo envía datos nuevos.
-         */
         @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-            // 1. Lectura de bytes
-            @Suppress("DEPRECATION")
-            val data = characteristic.value
-            
-            // 2. Limpieza de datos (elimina espacios y caracteres nulos)
-            val raw = String(data ?: byteArrayOf())
+            val raw = String(characteristic.value ?: byteArrayOf())
             val limpio = raw.trim().replace("\u0000", "")
-
-            // 3. División de datos (tipo:valor) y formateo
+            Log.d("BLE_DEBUG", "DATO RECIBIDO: $limpio")
+            
             val partes = limpio.split(":")
+            val tipo: String
+            val valorStr: String
 
-            if (partes.size == 2) {
-                val tipo = partes[0]
-                val valor = partes[1].toFloatOrNull()
+            // Parser flexible: Si la Pico envía "22.5" sin prefijo, asumimos que es TEMP
+            if (partes.size == 2 && partes[0].isNotEmpty()) {
+                tipo = partes[0].trim()
+                valorStr = partes[1].trim()
+            } else {
+                tipo = "TEMP"
+                valorStr = limpio
+            }
 
-                val textoFormateado = if (valor != null) {
-                    String.format(Locale.US, "%.2f", valor)
-                } else {
-                    partes[1]
-                }
+            if (tipo.isNotEmpty() && valorStr.isNotEmpty()) {
+                val valorFloat = valorStr.replace(",", ".").toFloatOrNull()
+                // Formateamos siempre a 2 decimales para la UI
+                val textoFinal = if (valorFloat != null) String.format(Locale.US, "%.2f", valorFloat) else valorStr
 
-                val db = dbHelper.writableDatabase
-                val values = android.content.ContentValues().apply {
-                    put("tipo", tipo)
-                    put("valor", textoFormateado)
-                }
-                db.insert("datos", null, values)
+                guardarEnDB(tipo, textoFinal)
 
                 runOnUiThread {
-                    // Actualizamos el estado específico según el tipo para el Dashboard
-                    when (tipo) {
-                        "TEMP" -> tempActual = textoFormateado
-                        "HUM" -> humActual = textoFormateado
-                        "DIST" -> distActual = textoFormateado
-                    }
-                    // Añadimos al historial
-                    listaDatos.add(0, "$tipo: $textoFormateado")
+                    actualizarEstadoUI(tipo, textoFinal, valorFloat)
                 }
             }
         }
     }
 
-    /**
-     * Consulta la base de datos para cargar el historial de datos guardados.
-     */
-    fun cargarDatos() {
-        listaDatos.clear()
-        val db = dbHelper.readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM datos ORDER BY id DESC", null)
-
-        while (cursor.moveToNext()) {
-            val tipo = cursor.getString(1)
-            val valor = cursor.getString(2)
-            listaDatos.add("$tipo: $valor")
-        }
-        cursor.close()
+    private fun guardarEnDB(tipo: String, valor: String) {
+        try {
+            val db = dbHelper.writableDatabase
+            val values = android.content.ContentValues().apply {
+                put("tipo", tipo)
+                put("valor", valor)
+            }
+            db.insert("datos", null, values)
+        } catch (e: Exception) { Log.e("DB", "Error al guardar", e) }
     }
 
-    /**
-     * Obtiene los últimos 20 valores de temperatura para la gráfica.
-     */
-    fun obtenerDatosTemp(): List<Float> {
-        val lista = mutableListOf<Float>()
-        val db = dbHelper.readableDatabase
-
-        val cursor = db.rawQuery(
-            "SELECT valor FROM datos WHERE tipo='TEMP' ORDER BY id DESC LIMIT 20",
-            null
-        )
-
-        while (cursor.moveToNext()) {
-            val valorString = cursor.getString(0)
-            val valor = valorString.replace(",", ".").toFloatOrNull()
-            if (valor != null) lista.add(valor)
+    private fun actualizarEstadoUI(tipo: String, texto: String, valor: Float?) {
+        // Actualizar tarjetas
+        when (tipo) {
+            "TEMP" -> {
+                tempActual = texto
+                valor?.let {
+                    listaPuntosGrafica.add(it)
+                    if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
+                }
+            }
+            "HUM" -> humActual = texto
+            "DIST" -> distActual = texto
         }
-
-        cursor.close()
-        return lista.reversed()
+        // Actualizar historial (limitado a 10 para evitar scroll infinito y mantenerlo limpio)
+        listaHistorial.add(0, "$tipo: $texto")
+        if (listaHistorial.size > 10) listaHistorial.removeAt(listaHistorial.size - 1)
     }
 }
 
-/**
- * Componente visual para mostrar la evolución de la temperatura.
- */
+// --- COMPOSABLES DE INTERFAZ ---
+
 @Composable
-fun GraficaTemperatura(datos: List<Float>) {
+fun DashboardScreen(temp: String, hum: String, dist: String, puntos: SnapshotStateList<Float>, historial: SnapshotStateList<String>) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("SynCar Dashboard", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        SensorCard("🌡 Temperatura", temp, "°C", Color(0xFFE53935))
+        SensorCard("💧 Humedad", hum, "%", Color(0xFF1E88E5))
+        SensorCard("📏 Distancia", dist, "cm", Color(0xFF43A047))
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Evolución Térmica", fontWeight = FontWeight.Bold)
+        GraficaRealTime(puntos)
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Historial (Real-Time)", fontWeight = FontWeight.Bold)
+        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            items(historial) { dato ->
+                Text(dato, fontSize = 14.sp, modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun GraficaRealTime(puntos: List<Float>) {
     AndroidView(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp),
+        modifier = Modifier.fillMaxWidth().height(200.dp),
         factory = { context ->
             LineChart(context).apply {
+                setNoDataText("Esperando telemetría...")
                 description.isEnabled = false
-                setTouchEnabled(true)
-                setPinchZoom(true)
                 legend.isEnabled = true
-                
-                // Configuración de los ejes
-                xAxis.setDrawGridLines(false)
-                xAxis.setDrawLabels(false)
                 axisRight.isEnabled = false
+                xAxis.setDrawLabels(false)
+                xAxis.setDrawGridLines(false)
+                setTouchEnabled(true)
+
+                // Inicializamos el dataSet vacío una sola vez
+                val dataSet = LineDataSet(mutableListOf(), "Temperatura °C").apply {
+                    color = android.graphics.Color.RED
+                    lineWidth = 3f
+                    setDrawValues(false)
+                    setDrawCircles(false)
+                    mode = LineDataSet.Mode.CUBIC_BEZIER
+                }
+                data = LineData(dataSet)
             }
         },
         update = { chart ->
-            val entries = datos.mapIndexed { index, value ->
-                Entry(index.toFloat(), value)
+            // En lugar de recrear el LineData, actualizamos el DataSet existente
+            val dataSet = chart.data?.getDataSetByIndex(0) as? LineDataSet
+            if (dataSet != null) {
+                dataSet.clear()
+                puntos.forEachIndexed { i, v ->
+                    dataSet.addEntry(Entry(i.toFloat(), v))
+                }
+                chart.data.notifyDataChanged()
+                chart.notifyDataSetChanged()
+                chart.invalidate()
             }
-
-            val dataSet = LineDataSet(entries, "Temperatura (°C)").apply {
-                color = android.graphics.Color.RED
-                setCircleColor(android.graphics.Color.RED)
-                lineWidth = 2f
-                circleRadius = 3f
-                setDrawCircleHole(false)
-                valueTextSize = 0f // No mostramos el texto del valor en cada punto para no saturar
-                setDrawFilled(true)
-                fillColor = android.graphics.Color.RED
-                fillAlpha = 30
-            }
-
-            chart.data = LineData(dataSet)
-            chart.invalidate() // Refrescar la gráfica
         }
     )
 }
 
-/**
- * Componente visual reutilizable para mostrar los datos de los sensores.
- */
 @Composable
 fun SensorCard(titulo: String, valor: String, unidad: String, color: Color) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(containerColor = color),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(4.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = titulo,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "$valor $unidad",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+        Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(titulo, color = Color.White, fontSize = 14.sp)
+            Text("$valor $unidad", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
-/**
- * Vista previa para el diseño de Compose.
- */
-@Preview(showBackground = true)
+// Necesario para el historial eficiente
 @Composable
-fun GreetingPreview() {
-    SynCarTheme {
-        Column {
-            Text("Vista Previa SynCar")
-        }
-    }
+fun LazyColumn(modifier: Modifier, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+    androidx.compose.foundation.lazy.LazyColumn(modifier = modifier, content = content)
+}
+
+fun <T> androidx.compose.foundation.lazy.LazyListScope.items(items: List<T>, itemContent: @Composable (T) -> Unit) {
+    items(items.size) { index -> itemContent(items[index]) }
 }
