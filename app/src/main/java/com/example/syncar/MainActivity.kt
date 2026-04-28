@@ -1,5 +1,6 @@
 package com.example.syncar
 
+// --- IMPORTACIONES ---
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -18,27 +19,37 @@ import androidx.core.app.ActivityCompat
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.util.Log
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.util.Locale
 import java.util.UUID
 
 /**
- * Clase principal de la aplicación.
- * Gestiona el ciclo de vida de la actividad, los permisos y la conexión BLE.
+ * MainActivity: Gestiona el ciclo de vida de la app, los permisos y la comunicación BLE.
  */
 class MainActivity : ComponentActivity() {
+    // dbHelper: Nos permite interactuar con la base de datos SQLite local.
+    lateinit var dbHelper: DatabaseHelper
+    
+    // Estados para el Dashboard (Valores actuales)
+    var tempActual by mutableStateOf("--")
+    var humActual by mutableStateOf("--")
+    var distActual by mutableStateOf("--")
 
-    var temperatura by mutableStateOf("Sin datos")
-
-    // Objeto que representa el adaptador Bluetooth del dispositivo (el hardware)
+    // bluetoothAdapter: Interfaz principal para el hardware de Bluetooth del móvil.
     private var bluetoothAdapter: BluetoothAdapter? = null
-    // Escáner para buscar dispositivos BLE cercanos
+    // scanner: Objeto especializado en buscar señales de dispositivos BLE.
     private var scanner: BluetoothLeScanner? = null
 
+    // listaDatos: Lista observable que almacena los mensajes para mostrar en pantalla.
+    var listaDatos = mutableStateListOf<String>()
+
     /**
-     * Gestor de permisos: se encarga de recibir la respuesta del usuario cuando pedimos permisos.
-     * Si el usuario acepta todo, llama a startBleScan().
+     * Gestor de permisos (ActivityResult): Maneja la respuesta del usuario cuando pedimos acceso.
+     * Si acepta, iniciamos el escaneo automáticamente.
      */
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -46,144 +57,126 @@ class MainActivity : ComponentActivity() {
             if (allGranted) {
                 startBleScan()
             } else {
-                Log.e("BLE", "Permisos no concedidos por el usuario.")
+                Log.e("BLE", "Permisos denegados. El escaneo no puede continuar.")
             }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("BLE", "APP INICIADA")
+        Log.d("BLE", "Iniciando Aplicación SynCar...")
+
+        // Inicializamos la base de datos y cargamos el historial previo.
+        dbHelper = DatabaseHelper(this)
+        cargarDatos()
         
-        // Define la interfaz visual usando Compose
+        // --- INTERFAZ DE USUARIO (Dashboard) ---
         setContent {
             SynCarTheme {
-                Text("Temperatura: $temperatura")
+                Column {
+                    Text("🌡 Temperatura: $tempActual °C")
+                    Text("💧 Humedad: $humActual %")
+                    Text("📏 Distancia: $distActual cm")
+
+                    Text("\n----- HISTORIAL -----")
+
+                    // Mostramos los últimos 5 datos recibidos para no saturar
+                    listaDatos.take(5).forEach {
+                        Text(it)
+                    }
+                }
             }
         }
 
-        // Obtenemos los servicios del sistema necesarios para Bluetooth
+        // Obtención de los servicios de Bluetooth del sistema.
         val bluetoothManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
         scanner = bluetoothAdapter?.bluetoothLeScanner
 
-        /**
-         * Bloque de petición inmediata de permisos al arrancar.
-         * En Android 12 (API 31) o superior, se necesitan permisos específicos de SCAN y CONNECT.
-         */
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_SCAN), 1)
-            }
-
-            if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 2)
-            }
-        }
-
-        // El permiso de localización es obligatorio para el escaneo BLE en versiones anteriores a la 12
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 3)
-        }
-
-        // Verificamos de nuevo y empezamos el proceso de escaneo
+        // Comprobación de permisos inicial antes de arrancar el proceso.
         checkPermissionsAndStartScan()
     }
 
     /**
-     * Determina qué permisos faltan y los solicita formalmente.
+     * Verifica permisos según la versión de Android y solicita los que falten.
      */
     private fun checkPermissionsAndStartScan() {
         val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+ requiere permisos específicos de Escaneo y Conexión.
             permissions.add(Manifest.permission.BLUETOOTH_SCAN)
             permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
         } else {
+            // Versiones anteriores dependen del permiso de localización fina.
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
-        // Si ya tenemos todos los permisos concedidos, iniciamos el escaneo directamente
         if (permissions.all { ActivityCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }) {
             startBleScan()
         } else {
-            // Si falta alguno, lanzamos el cuadro de diálogo del sistema
             requestPermissionLauncher.launch(permissions.toTypedArray())
         }
     }
 
     /**
-     * Inicia la búsqueda de dispositivos Bluetooth cercanos.
+     * Inicia el proceso de búsqueda (Scan) de dispositivos BLE.
      */
     private fun startBleScan() {
-        Log.d("BLE", "Intentando iniciar escaneo...")
-        // Comprobación de seguridad para evitar crashes por permisos
+        // Validación de seguridad para evitar errores de ejecución por falta de permisos.
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Log.e("BLE", "Falta permiso BLUETOOTH_SCAN")
             return
         }
-        Log.d("BLE", "VOY A ESCANEAR")
-        // Llama al callback cada vez que encuentre un dispositivo
+        Log.d("BLE", "Escaneando dispositivos...")
         scanner?.startScan(scanCallback)
     }
 
     /**
-     * Callback que se ejecuta cuando el escáner encuentra un dispositivo.
+     * Callback de Escaneo: Se dispara por cada dispositivo detectado.
      */
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            // Verificamos permiso de conexión (requerido en Android 12+)
             if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 return
             }
             
-            // Obtenemos el nombre del dispositivo detectado
-            val deviceName = result.device.name
+            // Si encontramos el dispositivo con el nombre configurado ("SynCar").
+            if (result.device.name == "SynCar") {
+                Log.d("BLE", "Dispositivo SynCar encontrado. Deteniendo escaneo y conectando...")
+                
+                // Detenemos el escaneo para ahorrar batería.
+                scanner?.stopScan(this)
 
-            // Filtramos para conectarnos SOLO al dispositivo llamado "SynCar"
-            if (deviceName == "SynCar") {
-                Log.d("BLE", "Encontrado SynCar")
-
-                // Detenemos el escaneo para no gastar batería innecesariamente
-                if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                    scanner?.stopScan(this)
-                }
-
-                // Intentamos conectar con el dispositivo encontrado
-                val device = result.device
-                device.connectGatt(this@MainActivity, false, gattCallback)
+                // Establecemos la conexión GATT.
+                result.device.connectGatt(this@MainActivity, false, gattCallback)
             }
         }
     }
 
     /**
-     * Callback que gestiona la comunicación una vez conectados al dispositivo.
+     * Callback GATT: Gestiona la conexión y el intercambio de datos.
      */
     private val gattCallback = object : BluetoothGattCallback() {
         
-        // Se dispara cuando la conexión cambia de estado (se conecta o desconecta)
+        // Se dispara al conectar o desconectar del dispositivo.
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.d("BLE", "Conectado al servidor GATT")
-                // Una vez conectados, pedimos al dispositivo que nos diga qué servicios tiene
+                Log.d("BLE", "Conectado al servidor. Descubriendo servicios...")
                 if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                     gatt.discoverServices()
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.d("BLE", "Desconectado del servidor GATT")
+                Log.d("BLE", "Desconectado del servidor.")
             }
         }
 
-        // Se dispara cuando el dispositivo ha terminado de listar sus servicios
+        // Se dispara cuando el dispositivo reporta sus "carpetas" (servicios) disponibles.
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d("BLE", "Servicios descubiertos con éxito")
-
-                // Accedemos al servicio específico usando su ID único (UUID)
+                // Buscamos el Servicio y Característica por sus identificadores únicos (UUID).
                 val service = gatt.getService(UUID.fromString("12345678-1234-5678-1234-56789abcdef0"))
-                // Accedemos a la característica de lectura dentro de ese servicio
                 val characteristic = service?.getCharacteristic(UUID.fromString("12345678-1234-5678-1234-56789abcdef1"))
 
                 characteristic?.let {
-                    // Activamos las "notificaciones": el móvil recibirá datos automáticamente cuando el dispositivo los envíe
+                    // Habilitamos las notificaciones para recibir datos de forma automática.
                     if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
                         gatt.setCharacteristicNotification(it, true)
                     }
@@ -192,44 +185,78 @@ class MainActivity : ComponentActivity() {
         }
 
         /**
-         * Se dispara CADA VEZ que recibimos datos nuevos del dispositivo.
-         * (Solo funciona si setCharacteristicNotification fue exitoso)
+         * Se dispara CADA VEZ que el dispositivo envía datos nuevos.
          */
         @Deprecated("Deprecated in Java")
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            // Obtenemos los datos en bruto (bytes)
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            // 1. Lectura de bytes
             @Suppress("DEPRECATION")
             val data = characteristic.value
-            // Convertimos esos bytes a un texto legible
-            val text = String(data ?: byteArrayOf())
+            
+            // 2. Limpieza de datos (elimina espacios y caracteres nulos)
+            val raw = String(data ?: byteArrayOf())
+            val limpio = raw.trim().replace("\u0000", "")
 
-            Log.d("BLE", "Dato recibido: $text")
-            temperatura = text
+            // 3. División de datos (tipo:valor) y formateo
+            val partes = limpio.split(":")
+
+            if (partes.size == 2) {
+                val tipo = partes[0]
+                val valor = partes[1].toFloatOrNull()
+
+                val textoFormateado = if (valor != null) {
+                    String.format(Locale.US, "%.2f", valor)
+                } else {
+                    partes[1]
+                }
+
+                val db = dbHelper.writableDatabase
+                val values = android.content.ContentValues().apply {
+                    put("tipo", tipo)
+                    put("valor", textoFormateado)
+                }
+                db.insert("datos", null, values)
+
+                runOnUiThread {
+                    // Actualizamos el estado específico según el tipo para el Dashboard
+                    when (tipo) {
+                        "TEMP" -> tempActual = textoFormateado
+                        "HUM" -> humActual = textoFormateado
+                        "DIST" -> distActual = textoFormateado
+                    }
+                    // Añadimos al historial
+                    listaDatos.add(0, "$tipo: $textoFormateado")
+                }
+            }
         }
+    }
+
+    /**
+     * Consulta la base de datos para cargar el historial de datos guardados.
+     */
+    fun cargarDatos() {
+        listaDatos.clear()
+        val db = dbHelper.readableDatabase
+        val cursor = db.rawQuery("SELECT * FROM datos ORDER BY id DESC", null)
+
+        while (cursor.moveToNext()) {
+            val tipo = cursor.getString(1)
+            val valor = cursor.getString(2)
+            listaDatos.add("$tipo: $valor")
+        }
+        cursor.close()
     }
 }
 
 /**
- * Función de interfaz (Compose) para mostrar texto en la pantalla del móvil.
- */
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "SynCar: Buscando y conectando...",
-        modifier = modifier
-    )
-}
-
-/**
- * Permite ver el diseño en la pestaña 'Preview' de Android Studio sin ejecutar la app.
+ * Vista previa para el diseño de Compose.
  */
 @Preview(showBackground = true)
 @Composable
 fun GreetingPreview() {
     SynCarTheme {
-        Greeting("Android")
+        Column {
+            Text("Vista Previa SynCar")
+        }
     }
 }
