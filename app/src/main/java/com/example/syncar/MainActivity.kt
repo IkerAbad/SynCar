@@ -9,6 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Text
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -19,11 +21,15 @@ import androidx.core.app.ActivityCompat
 import android.bluetooth.*
 import android.bluetooth.le.*
 import android.util.Log
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.util.Locale
 import java.util.UUID
 
@@ -69,19 +75,45 @@ class MainActivity : ComponentActivity() {
         dbHelper = DatabaseHelper(this)
         cargarDatos()
         
-        // --- INTERFAZ DE USUARIO (Dashboard) ---
+        // --- INTERFAZ DE USUARIO (Dashboard con Tarjetas) ---
         setContent {
             SynCarTheme {
-                Column {
-                    Text("🌡 Temperatura: $tempActual °C")
-                    Text("💧 Humedad: $humActual %")
-                    Text("📏 Distancia: $distActual cm")
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Dashboard SynCar",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
 
-                    Text("\n----- HISTORIAL -----")
+                    // 🔥 TARJETAS PRINCIPALES
+                    SensorCard("🌡 Temperatura", tempActual, "°C")
+                    SensorCard("💧 Humedad", humActual, "%")
+                    SensorCard("📏 Distancia", distActual, "cm")
 
-                    // Mostramos los últimos 5 datos recibidos para no saturar
-                    listaDatos.take(5).forEach {
-                        Text(it)
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "Historial reciente",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Lista de historial con scroll opcional (simplificado)
+                    Column {
+                        listaDatos.take(5).forEach {
+                            Text(
+                                text = it,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -245,6 +277,38 @@ class MainActivity : ComponentActivity() {
             listaDatos.add("$tipo: $valor")
         }
         cursor.close()
+    }
+}
+
+/**
+ * Componente visual reutilizable para mostrar los datos de los sensores.
+ */
+@Composable
+fun SensorCard(titulo: String, valor: String, unidad: String) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = titulo,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "$valor $unidad",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
     }
 }
 
