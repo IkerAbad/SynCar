@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -91,9 +92,9 @@ class MainActivity : ComponentActivity() {
                     )
 
                     // 🔥 TARJETAS PRINCIPALES
-                    SensorCard("🌡 Temperatura", tempActual, "°C")
-                    SensorCard("💧 Humedad", humActual, "%")
-                    SensorCard("📏 Distancia", distActual, "cm")
+                    SensorCard("🌡 Temperatura", tempActual, "°C", Color(0xFFE53935))
+                    SensorCard("💧 Humedad", humActual, "%", Color(0xFF1E88E5))
+                    SensorCard("📏 Distancia", distActual, "cm", Color(0xFF43A047))
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -284,11 +285,12 @@ class MainActivity : ComponentActivity() {
  * Componente visual reutilizable para mostrar los datos de los sensores.
  */
 @Composable
-fun SensorCard(titulo: String, valor: String, unidad: String) {
+fun SensorCard(titulo: String, valor: String, unidad: String, color: Color) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = color),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Column(
@@ -300,13 +302,15 @@ fun SensorCard(titulo: String, valor: String, unidad: String) {
             Text(
                 text = titulo,
                 fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = Color.White
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "$valor $unidad",
                 fontSize = 28.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = Color.White
             )
         }
     }
