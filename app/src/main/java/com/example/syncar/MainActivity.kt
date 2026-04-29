@@ -30,6 +30,8 @@ import java.util.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import android.content.ContentValues
@@ -49,6 +51,10 @@ class MainActivity : ComponentActivity() {
     private var humActual by mutableStateOf("--")
     private var distActual by mutableStateOf("--")
     private var bleStatus by mutableStateOf("Desconectado")
+    
+    // --- ESTADOS DE ALERTA ---
+    private var alertMessage by mutableStateOf<String?>(null)
+    private var isCriticalAlert by mutableStateOf(false)
 
     // --- ESTADOS DE SESIÓN (MODO CONDUCCIÓN) ---
     private var isJourneyActive by mutableStateOf(false)
@@ -139,12 +145,19 @@ class MainActivity : ComponentActivity() {
                             puntos = listaPuntosGrafica,
                             historial = listaHistorial,
                             isJourneyActive = isJourneyActive,
+                            alertMsg = alertMessage,
+                            isAlertCritical = isCriticalAlert,
+                            onDismissAlert = { 
+                                alertMessage = null
+                                isCriticalAlert = false
+                            },
                             onStartJourney = { iniciarTrayecto() },
                             onStopJourney = { finalizarTrayecto() },
                             onLogout = {
                                 if (isJourneyActive) finalizarTrayecto()
                                 bleManager.disconnect()
                                 isLoggedIn = false
+                                alertMessage = null
                                 // Resetear estados
                                 tempActual = "--"
                                 humActual = "--"
@@ -266,17 +279,40 @@ class MainActivity : ComponentActivity() {
 
     private fun actualizarEstadoUI(tipo: String, texto: String, valor: Float?) {
         val v = valor ?: 0f
+        var currentAlert: String? = null
+        var isCritical = false
+
         when (tipo) {
             "TEMP" -> {
                 tempActual = texto
                 listaPuntosGrafica.add(v)
                 if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
+                
+                if (v > 35f) {
+                    currentAlert = "¡PELIGRO! Temperatura motor crítica: $texto°C"
+                    isCritical = true
+                }
             }
             "HUM" -> humActual = texto
-            "DIST" -> distActual = texto
+            "DIST" -> {
+                distActual = texto
+                if (v < 30f && v > 0f) {
+                    currentAlert = "¡AVISO! Distancia de seguridad reducida: $texto cm"
+                    isCritical = v < 15f // Crítico si está muy cerca
+                }
+            }
         }
         
-        // Si hay trayecto activo, guardamos para el resumen final
+        // Gestión de alertas prioritaria
+        if (currentAlert != null) {
+            alertMessage = currentAlert
+            isCriticalAlert = isCritical
+        } else if (!isCriticalAlert) {
+            // Solo limpiamos la alerta si no es una crítica que requiere atención
+            alertMessage = null 
+        }
+
+        // Si hay trayecto activo...
         if (isJourneyActive) {
             val t = tempActual.replace(",", ".").toFloatOrNull() ?: 0f
             val h = humActual.replace(",", ".").toFloatOrNull() ?: 0f
@@ -362,6 +398,9 @@ fun DashboardScreen(
     puntos: SnapshotStateList<Float>,
     historial: SnapshotStateList<String>,
     isJourneyActive: Boolean,
+    alertMsg: String?,
+    isAlertCritical: Boolean,
+    onDismissAlert: () -> Unit,
     onStartJourney: () -> Unit,
     onStopJourney: () -> Unit,
     onLogout: () -> Unit
@@ -405,6 +444,34 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item { Spacer(modifier = Modifier.height(8.dp)) }
+
+            // SECCIÓN DE ALERTAS DINÁMICAS
+            if (alertMsg != null) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isAlertCritical) Color(0xFFB71C1C) else Color(0xFFE65100)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        onClick = onDismissAlert
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (isAlertCritical) Icons.Default.Warning else Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(alertMsg, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            Text("Tocar para cerrar", fontSize = 10.sp, color = Color.White.copy(0.7f))
+                        }
+                    }
+                }
+            }
             
             // MODO CONDUCCIÓN (REQUISITO TFG)
             item {
