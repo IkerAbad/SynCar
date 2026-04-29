@@ -28,6 +28,12 @@ import com.github.mikephil.charting.data.*
 import java.text.SimpleDateFormat
 import java.util.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
+import android.content.ContentValues
+import android.widget.Toast
 
 /**
  * MainActivity: Refactorizada para usar BleManager y gestionar sesiones de usuario.
@@ -44,9 +50,48 @@ class MainActivity : ComponentActivity() {
     private var distActual by mutableStateOf("--")
     private var bleStatus by mutableStateOf("Desconectado")
 
+    // --- ESTADOS DE SESIÓN (MODO CONDUCCIÓN) ---
+    private var isJourneyActive by mutableStateOf(false)
+    private var currentJourneyId by mutableStateOf(-1L)
+    private val journeyDataPoints = mutableListOf<Triple<Float, Float, Float>>() // Temp, Hum, Dist
+    private var startTimeMillis by mutableLongStateOf(0L)
+
     private var isLoggedIn by mutableStateOf(false)
     private var currentUserId by mutableStateOf(-1)
     private var currentSessionId by mutableStateOf(-1L)
+
+    private fun iniciarTrayecto() {
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put("usuario_id", currentUserId)
+        }
+        currentJourneyId = db.insert("sesiones", null, values)
+        isJourneyActive = true
+        startTimeMillis = System.currentTimeMillis()
+        journeyDataPoints.clear()
+        Toast.makeText(this, "Trayecto iniciado", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun finalizarTrayecto() {
+        if (!isJourneyActive) return
+
+        val durationSec = (System.currentTimeMillis() - startTimeMillis) / 1000
+        val avgTemp = if (journeyDataPoints.isNotEmpty()) journeyDataPoints.map { it.first }.average().toFloat() else 0f
+        val minDist = if (journeyDataPoints.isNotEmpty()) journeyDataPoints.map { it.third }.minOrNull() ?: 0f else 0f
+
+        val db = dbHelper.writableDatabase
+        val values = ContentValues().apply {
+            put("fin", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
+            put("temp_media", avgTemp)
+            put("dist_min", minDist)
+            put("duracion_seg", durationSec)
+        }
+        db.update("sesiones", values, "id = ?", arrayOf(currentJourneyId.toString()))
+
+        isJourneyActive = false
+        currentJourneyId = -1
+        Toast.makeText(this, "Trayecto finalizado: ${durationSec}s, Media: $avgTemp°C", Toast.LENGTH_LONG).show()
+    }
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
@@ -93,10 +138,19 @@ class MainActivity : ComponentActivity() {
                             status = bleStatus,
                             puntos = listaPuntosGrafica,
                             historial = listaHistorial,
+                            isJourneyActive = isJourneyActive,
+                            onStartJourney = { iniciarTrayecto() },
+                            onStopJourney = { finalizarTrayecto() },
                             onLogout = {
-                                finalizarSesion()
+                                if (isJourneyActive) finalizarTrayecto()
                                 bleManager.disconnect()
                                 isLoggedIn = false
+                                // Resetear estados
+                                tempActual = "--"
+                                humActual = "--"
+                                distActual = "--"
+                                listaHistorial.clear()
+                                listaPuntosGrafica.clear()
                             }
                         )
                     }
@@ -166,7 +220,7 @@ class MainActivity : ComponentActivity() {
     private fun iniciarSesion(userId: Int) {
         try {
             val db = dbHelper.writableDatabase
-            val values = android.content.ContentValues().apply {
+            val values = ContentValues().apply {
                 put("usuario_id", userId)
             }
             currentSessionId = db.insert("sesiones", null, values)
@@ -177,7 +231,7 @@ class MainActivity : ComponentActivity() {
         if (currentSessionId != -1L) {
             try {
                 val db = dbHelper.writableDatabase
-                val values = android.content.ContentValues().apply {
+                val values = ContentValues().apply {
                     put("fin", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
                 }
                 db.update("sesiones", values, "id = ?", arrayOf(currentSessionId.toString()))
@@ -191,7 +245,7 @@ class MainActivity : ComponentActivity() {
             val db = dbHelper.writableDatabase
             db.beginTransaction()
             try {
-                val values = android.content.ContentValues().apply {
+                val values = ContentValues().apply {
                     if (currentSessionId != -1L) put("sesion_id", currentSessionId)
                     put("tipo", tipo)
                     put("valor", valor)
@@ -211,17 +265,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun actualizarEstadoUI(tipo: String, texto: String, valor: Float?) {
+        val v = valor ?: 0f
         when (tipo) {
             "TEMP" -> {
                 tempActual = texto
-                valor?.let {
-                    listaPuntosGrafica.add(it)
-                    if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
-                }
+                listaPuntosGrafica.add(v)
+                if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
             }
             "HUM" -> humActual = texto
             "DIST" -> distActual = texto
         }
+        
+        // Si hay trayecto activo, guardamos para el resumen final
+        if (isJourneyActive) {
+            val t = tempActual.replace(",", ".").toFloatOrNull() ?: 0f
+            val h = humActual.replace(",", ".").toFloatOrNull() ?: 0f
+            val d = distActual.replace(",", ".").toFloatOrNull() ?: 0f
+            journeyDataPoints.add(Triple(t, h, d))
+        }
+
         listaHistorial.add(0, "$tipo: $texto")
         if (listaHistorial.size > 10) listaHistorial.removeAt(listaHistorial.size - 1)
     }
@@ -292,68 +354,139 @@ fun LoginScreen(onLoginSuccess: (Int) -> Unit) {
 }
 
 @Composable
-fun DashboardScreen(temp: String, hum: String, dist: String, status: String, puntos: SnapshotStateList<Float>, historial: SnapshotStateList<String>, onLogout: () -> Unit) {
+fun DashboardScreen(
+    temp: String,
+    hum: String,
+    dist: String,
+    status: String,
+    puntos: SnapshotStateList<Float>,
+    historial: SnapshotStateList<String>,
+    isJourneyActive: Boolean,
+    onStartJourney: () -> Unit,
+    onStopJourney: () -> Unit,
+    onLogout: () -> Unit
+) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color(0xFF121212),
         topBar = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f))
+                    .background(Color(0xFF1E1E1E))
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("SynCar Dashboard", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Button(
-                        onClick = onLogout,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                    ) {
-                        Text("Cerrar Sesión", fontSize = 12.sp, color = Color.White)
+                    Text("SynCar Dashboard", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    IconButton(onClick = onLogout) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = "Logout", tint = Color.LightGray)
                     }
                 }
                 Text(
-                    text = "Estado: $status",
-                    fontSize = 12.sp,
-                    color = if (status.contains("Recibiendo") || status.contains("Conectado")) Color.Green else Color.Yellow,
-                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                    text = "• $status",
+                    fontSize = 13.sp,
+                    color = if (status.contains("Recibiendo") || status.contains("Conectado")) Color(0xFF4CAF50) else Color(0xFFFFC107),
+                    modifier = Modifier.padding(start = 16.dp, bottom = 12.dp)
                 )
             }
         }
     ) { innerPadding ->
-        Column(
+        androidx.compose.foundation.lazy.LazyColumn(
             modifier = Modifier
-                .padding(innerPadding)
                 .fillMaxSize()
-                .padding(horizontal = 16.dp)
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Spacer(modifier = Modifier.height(8.dp))
-            val tempValor = temp.replace(",", ".").toFloatOrNull() ?: 0f
-            val tempColor = when {
-                tempValor < 20f -> Color(0xFF1E88E5)
-                tempValor < 30f -> Color(0xFF43A047)
-                else -> Color(0xFFE53935)
-            }
-            SensorCard("🌡 Temperatura", temp, "°C", tempColor)
-            SensorCard("💧 Humedad", hum, "%", Color(0xFF0288D1))
-            SensorCard("📏 Distancia", dist, "cm", Color(0xFF7B1FA2))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Evolución Térmica", fontWeight = FontWeight.Bold, color = Color.White)
-            GraficaRealTime(puntos)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Historial (Real-Time)", fontWeight = FontWeight.Bold, color = Color.White)
-            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                items(historial) { dato ->
-                    Text(dato, fontSize = 14.sp, color = Color.LightGray, modifier = Modifier.padding(vertical = 2.dp))
+            item { Spacer(modifier = Modifier.height(8.dp)) }
+            
+            // MODO CONDUCCIÓN (REQUISITO TFG)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = if (isJourneyActive) Color(0xFF2E7D32) else Color(0xFF263238)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(if (isJourneyActive) "TRAYECTO ACTIVO" else "MODO CONDUCCIÓN", fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(if (isJourneyActive) "Registrando viaje..." else "Pulsa para iniciar registro", fontSize = 12.sp, color = Color.White.copy(0.7f))
+                        }
+                        Button(
+                            onClick = if (isJourneyActive) onStopJourney else onStartJourney,
+                            colors = ButtonDefaults.buttonColors(containerColor = if (isJourneyActive) Color(0xFFD32F2F) else Color(0xFF43A047)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(if (isJourneyActive) "PARAR" else "INICIAR")
+                        }
+                    }
                 }
             }
+
+            // TARJETAS SENSORES
+            item {
+                val tVal = temp.replace(",", ".").toFloatOrNull() ?: 0f
+                val tColor = when {
+                    tVal < 20f -> Color(0xFF0288D1)
+                    tVal < 30f -> Color(0xFF43A047)
+                    else -> Color(0xFFD32F2F)
+                }
+                SensorCardItem("🌡 Temperatura", temp, "°C", tColor)
+            }
+            item { SensorCardItem("💧 Humedad", hum, "%", Color(0xFF0097A7)) }
+            item { 
+                val dVal = dist.replace(",", ".").toFloatOrNull() ?: 100f
+                SensorCardItem("📏 Distancia", dist, "cm", if (dVal < 30) Color(0xFFC62828) else Color(0xFF6A1B9A)) 
+            }
+
+            // GRÁFICA
+            item {
+                Text("Análisis Térmico", fontWeight = FontWeight.Bold, color = Color.Gray, fontSize = 14.sp)
+                GraficaRealTime(puntos)
+            }
+
+            // RAW DATA
+            item {
+                Text("Telemetría en Vivo", fontWeight = FontWeight.Bold, color = Color.Gray, fontSize = 14.sp)
+                Card(
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+                ) {
+                    androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.padding(8.dp)) {
+                        items(historial.size) { index ->
+                            Text(historial[index], fontSize = 11.sp, color = Color.DarkGray, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
+                    }
+                }
+            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+    }
+}
+
+@Composable
+fun SensorCardItem(titulo: String, valor: String, unidad: String, color: Color) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(titulo, color = Color.LightGray, fontSize = 16.sp)
+            Text("$valor $unidad", color = color, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
         }
     }
 }
@@ -402,23 +535,4 @@ fun GraficaRealTime(puntos: List<Float>) {
             }
         }
     )
-}
-
-@Composable
-fun SensorCard(titulo: String, valor: String, unidad: String, color: Color) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = color), elevation = CardDefaults.cardElevation(4.dp)) {
-        Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(titulo, color = Color.White, fontSize = 14.sp)
-            Text("$valor $unidad", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun LazyColumn(modifier: Modifier, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
-    androidx.compose.foundation.lazy.LazyColumn(modifier = modifier, content = content)
-}
-
-fun <T> androidx.compose.foundation.lazy.LazyListScope.items(items: List<T>, itemContent: @Composable (T) -> Unit) {
-    items(items.size) { index -> itemContent(items[index]) }
 }
