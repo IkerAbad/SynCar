@@ -5,11 +5,11 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
 /**
- * DatabaseHelper: Gestiona la persistencia de usuarios, sesiones y telemetría.
- * Incrementamos la versión a 2 para incluir nuevas tablas.
+ * DatabaseHelper: Gestiona la persistencia de usuarios, sesiones (viajes) y telemetría.
+ * Versión 3: Añadimos campos de resumen a sesiones para evitar cálculos pesados en UI.
  */
 class DatabaseHelper(context: Context) :
-    SQLiteOpenHelper(context, "syncar.db", null, 2) {
+    SQLiteOpenHelper(context, "syncar.db", null, 3) {
 
     override fun onCreate(db: SQLiteDatabase) {
         // Tabla de Usuarios para el Login
@@ -21,13 +21,16 @@ class DatabaseHelper(context: Context) :
             )
         """)
 
-        // Tabla de Sesiones (Trayectos)
+        // Tabla de Sesiones (Trayectos) - Mejorada para resumen
         db.execSQL("""
             CREATE TABLE sesiones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 usuario_id INTEGER,
                 inicio DATETIME DEFAULT CURRENT_TIMESTAMP,
                 fin DATETIME,
+                temp_media REAL,
+                dist_min REAL,
+                duracion_seg INTEGER,
                 FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
             )
         """)
