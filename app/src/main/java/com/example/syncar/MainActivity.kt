@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     // --- ESTADOS REACTIVOS UI ---
     private val listaHistorial = mutableStateListOf<String>()
     private val listaPuntosGrafica = mutableStateListOf<Float>()
+    private val listaViajes = mutableStateListOf<Trayecto>()
     private var tempActual by mutableStateOf("--")
     private var humActual by mutableStateOf("--")
     private var distActual by mutableStateOf("--")
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
                             status = bleStatus,
                             puntos = listaPuntosGrafica,
                             historial = listaHistorial,
+                            listaViajes = listaViajes,
                             isJourneyActive = isJourneyActive,
                             alertMsg = alertMessage,
                             isAlertCritical = isCriticalAlert,
@@ -171,6 +173,7 @@ class MainActivity : ComponentActivity() {
             
             db.update("sesiones", values, "id = ?", arrayOf(currentJourneyId.toString()))
             
+            cargarHistorialViajes() // Actualizar lista tras finalizar
             Toast.makeText(this, "Trayecto finalizado: ${durationSec}s", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             Log.e("JOURNEY", "Error al finalizar trayecto", e)
@@ -300,6 +303,7 @@ class MainActivity : ComponentActivity() {
 
     private fun inicializarDatosDesdeDB() {
         try {
+            cargarHistorialViajes()
             val db = dbHelper.readableDatabase
             val cHist = db.rawQuery("SELECT tipo, valor FROM datos ORDER BY id DESC LIMIT 10", null)
             while (cHist.moveToNext()) {
@@ -315,6 +319,23 @@ class MainActivity : ComponentActivity() {
             cGraph.close()
             listaPuntosGrafica.addAll(tempPuntos.reversed())
         } catch (e: Exception) { Log.e("DB", "Error init", e) }
+    }
+
+    private fun cargarHistorialViajes() {
+        try {
+            val db = dbHelper.readableDatabase
+            val cursor = db.rawQuery("SELECT id, duracion_seg, temp_media, dist_min FROM sesiones WHERE fin IS NOT NULL ORDER BY id DESC", null)
+            listaViajes.clear()
+            while (cursor.moveToNext()) {
+                listaViajes.add(Trayecto(
+                    id = cursor.getInt(0),
+                    duracion = cursor.getInt(1),
+                    tempMedia = cursor.getFloat(2),
+                    distMin = cursor.getFloat(3)
+                ))
+            }
+            cursor.close()
+        } catch (e: Exception) { Log.e("DB", "Error cargando viajes", e) }
     }
 
     override fun onDestroy() {
@@ -374,6 +395,7 @@ fun LoginScreen(onLoginSuccess: (Int) -> Unit) {
 fun DashboardScreen(
     temp: String, hum: String, dist: String, status: String,
     puntos: SnapshotStateList<Float>, historial: SnapshotStateList<String>,
+    listaViajes: SnapshotStateList<Trayecto>,
     isJourneyActive: Boolean, alertMsg: String?, isAlertCritical: Boolean,
     onDismissAlert: () -> Unit, onStartJourney: () -> Unit,
     onStopJourney: () -> Unit, onLogout: () -> Unit
@@ -456,10 +478,53 @@ fun DashboardScreen(
                     }
                 }
             }
+
+            item {
+                Text("Historial de Trayectos", fontWeight = FontWeight.Bold, color = Color.Gray, fontSize = 14.sp)
+            }
+
+            if (listaViajes.isEmpty()) {
+                item {
+                    Text("No hay trayectos registrados", color = Color.DarkGray, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
+                }
+            } else {
+                items(listaViajes.size) { index ->
+                    ViajeItem(listaViajes[index])
+                }
+            }
+
             item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
+
+@Composable
+fun ViajeItem(viaje: Trayecto) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+        border = BorderStroke(1.dp, Color.Gray.copy(0.2f))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("ID: #${viaje.id}", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                Text("Duración: ${viaje.duracion}s", color = Color.Cyan, fontSize = 12.sp)
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Media: ${String.format(Locale.US, "%.1f", viaje.tempMedia)}°C", color = Color.LightGray, fontSize = 12.sp)
+                Text("D. Mínima: ${String.format(Locale.US, "%.1f", viaje.distMin)}cm", color = Color.LightGray, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+data class Trayecto(
+    val id: Int,
+    val duracion: Int,
+    val tempMedia: Float,
+    val distMin: Float
+)
 
 @Composable
 fun SensorCardItem(titulo: String, valor: String, unidad: String, color: Color) {
