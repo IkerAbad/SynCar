@@ -536,20 +536,60 @@ fun DashboardScreen(
 
 @Composable
 fun ViajeItem(viaje: Trayecto, isSelected: Boolean, puntos: List<Float>, onClick: () -> Unit) {
+    // Lógica de evaluación multi-riesgo corregida
+    val estados = mutableListOf<Pair<String, Color>>()
+    if (viaje.tempMedia > 35f) {
+        estados.add("Riesgo térmico" to Color(0xFFD32F2F))
+    }
+    if (viaje.distMin < 20f) {
+        estados.add("Distancia peligrosa" to Color(0xFFE65100))
+    }
+    if (estados.isEmpty()) {
+        estados.add("Trayecto normal" to Color(0xFF2E7D32))
+    }
+
+    // El color del borde será el del primer estado o gris por defecto
+    val colorBorde = estados.firstOrNull()?.second ?: Color.Gray
+
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-        border = BorderStroke(1.dp, if (isSelected) Color.Cyan.copy(0.5f) else Color.Gray.copy(0.2f))
+        border = BorderStroke(1.dp, if (isSelected) Color.Cyan.copy(0.5f) else colorBorde.copy(alpha = 0.3f))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(
+                modifier = Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.SpaceBetween, 
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text("ID: #${viaje.id}", fontWeight = FontWeight.Bold, color = if (isSelected) Color.Cyan else Color.White, fontSize = 14.sp)
-                Text("Duración: ${viaje.duracion}s", color = Color.Cyan, fontSize = 12.sp)
+                
+                // Fila de badges dinámicos
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    estados.forEach { (texto, color) ->
+                        Surface(
+                            color = color.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = texto.uppercase(),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = color
+                            )
+                        }
+                    }
+                }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Media: ${String.format(Locale.US, "%.1f", viaje.tempMedia)}°C", color = Color.LightGray, fontSize = 12.sp)
-                Text("D. Mínima: ${String.format(Locale.US, "%.1f", viaje.distMin)}cm", color = Color.LightGray, fontSize = 12.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Duración: ${viaje.duracion}s", color = Color.Cyan, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Media: ${String.format(Locale.US, "%.1f", viaje.tempMedia)}°C", color = Color.LightGray, fontSize = 12.sp)
+                    Text("Mín: ${String.format(Locale.US, "%.1f", viaje.distMin)}cm", color = Color.LightGray, fontSize = 12.sp)
+                }
             }
 
             if (isSelected) {
