@@ -534,22 +534,37 @@ fun DashboardScreen(
     }
 }
 
-@Composable
-fun ViajeItem(viaje: Trayecto, isSelected: Boolean, puntos: List<Float>, onClick: () -> Unit) {
-    // Lógica de evaluación multi-riesgo corregida
-    val estados = mutableListOf<Pair<String, Color>>()
+const val ESTADO_RIESGO_TERMICO = "Riesgo térmico"
+const val ESTADO_DISTANCIA_PELIGROSA = "Distancia peligrosa"
+const val ESTADO_NORMAL = "Trayecto normal"
+
+data class EstadoTrayecto(val texto: String, val color: Color)
+
+fun evaluarTrayecto(viaje: Trayecto): List<EstadoTrayecto> {
+    val estados = mutableListOf<EstadoTrayecto>()
     if (viaje.tempMedia > 35f) {
-        estados.add("Riesgo térmico" to Color(0xFFD32F2F))
+        estados.add(EstadoTrayecto(ESTADO_RIESGO_TERMICO, Color(0xFFD32F2F)))
     }
     if (viaje.distMin < 20f) {
-        estados.add("Distancia peligrosa" to Color(0xFFE65100))
+        estados.add(EstadoTrayecto(ESTADO_DISTANCIA_PELIGROSA, Color(0xFFE65100)))
     }
     if (estados.isEmpty()) {
-        estados.add("Trayecto normal" to Color(0xFF2E7D32))
+        estados.add(EstadoTrayecto(ESTADO_NORMAL, Color(0xFF2E7D32)))
     }
+    return estados
+}
 
-    // El color del borde será el del primer estado o gris por defecto
-    val colorBorde = estados.firstOrNull()?.second ?: Color.Gray
+fun obtenerColorPrioritario(estados: List<EstadoTrayecto>): Color {
+    // Prioridad por búsqueda explícita para garantizar consistencia total
+    return estados.find { it.texto == ESTADO_RIESGO_TERMICO }?.color
+        ?: estados.find { it.texto == ESTADO_DISTANCIA_PELIGROSA }?.color
+        ?: Color(0xFF2E7D32) // Verde normal por defecto
+}
+
+@Composable
+fun ViajeItem(viaje: Trayecto, isSelected: Boolean, puntos: List<Float>, onClick: () -> Unit) {
+    val estados = evaluarTrayecto(viaje)
+    val colorBorde = obtenerColorPrioritario(estados)
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onClick() },
@@ -566,18 +581,18 @@ fun ViajeItem(viaje: Trayecto, isSelected: Boolean, puntos: List<Float>, onClick
                 
                 // Fila de badges dinámicos
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    estados.forEach { (texto, color) ->
+                    estados.forEach { estado ->
                         Surface(
-                            color = color.copy(alpha = 0.15f),
+                            color = estado.color.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(4.dp),
-                            border = BorderStroke(1.dp, color.copy(alpha = 0.4f))
+                            border = BorderStroke(1.dp, estado.color.copy(alpha = 0.4f))
                         ) {
                             Text(
-                                text = texto.uppercase(),
+                                text = estado.texto.uppercase(),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = color
+                                color = estado.color
                             )
                         }
                     }
