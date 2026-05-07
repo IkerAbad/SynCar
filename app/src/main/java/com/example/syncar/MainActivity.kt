@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -48,6 +49,8 @@ class MainActivity : ComponentActivity() {
     private val listaHistorial = mutableStateListOf<String>()
     private val listaPuntosGrafica = mutableStateListOf<Float>()
     private val listaViajes = mutableStateListOf<Trayecto>()
+    private var viajeSeleccionadoId by mutableStateOf(-1)
+    private val puntosGraficaViaje = mutableStateListOf<Float>()
     private var tempActual by mutableStateOf("--")
     private var humActual by mutableStateOf("--")
     private var distActual by mutableStateOf("--")
@@ -110,6 +113,8 @@ class MainActivity : ComponentActivity() {
                             puntos = listaPuntosGrafica,
                             historial = listaHistorial,
                             listaViajes = listaViajes,
+                            viajeSeleccionadoId = viajeSeleccionadoId,
+                            puntosViaje = puntosGraficaViaje,
                             isJourneyActive = isJourneyActive,
                             alertMsg = alertMessage,
                             isAlertCritical = isCriticalAlert,
@@ -119,7 +124,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onStartJourney = { iniciarTrayecto() },
                             onStopJourney = { finalizarTrayecto() },
-                            onLogout = { cerrarSesionCompleta() }
+                            onLogout = { cerrarSesionCompleta() },
+                            onViajeClick = { cargarGraficaViaje(it) }
                         )
                     }
                 }
@@ -338,6 +344,28 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) { Log.e("DB", "Error cargando viajes", e) }
     }
 
+    private fun cargarGraficaViaje(journeyId: Int) {
+        if (viajeSeleccionadoId == journeyId) {
+            viajeSeleccionadoId = -1
+            puntosGraficaViaje.clear()
+            return
+        }
+
+        viajeSeleccionadoId = journeyId
+        puntosGraficaViaje.clear()
+
+        try {
+            val db = dbHelper.readableDatabase
+            val cursor = db.rawQuery("SELECT valor FROM datos WHERE sesion_id = ? AND tipo = 'TEMP' ORDER BY id ASC", arrayOf(journeyId.toString()))
+            val puntos = mutableListOf<Float>()
+            while (cursor.moveToNext()) {
+                cursor.getString(0).replace(",", ".").toFloatOrNull()?.let { puntos.add(it) }
+            }
+            cursor.close()
+            puntosGraficaViaje.addAll(puntos)
+        } catch (e: Exception) { Log.e("DB", "Error cargando gráfica de viaje", e) }
+    }
+
     override fun onDestroy() {
         if (isJourneyActive) finalizarTrayecto()
         bleManager.disconnect()
@@ -396,9 +424,11 @@ fun DashboardScreen(
     temp: String, hum: String, dist: String, status: String,
     puntos: SnapshotStateList<Float>, historial: SnapshotStateList<String>,
     listaViajes: SnapshotStateList<Trayecto>,
+    viajeSeleccionadoId: Int, puntosViaje: SnapshotStateList<Float>,
     isJourneyActive: Boolean, alertMsg: String?, isAlertCritical: Boolean,
     onDismissAlert: () -> Unit, onStartJourney: () -> Unit,
-    onStopJourney: () -> Unit, onLogout: () -> Unit
+    onStopJourney: () -> Unit, onLogout: () -> Unit,
+    onViajeClick: (Int) -> Unit
 ) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -489,7 +519,13 @@ fun DashboardScreen(
                 }
             } else {
                 items(listaViajes.size) { index ->
-                    ViajeItem(listaViajes[index])
+                    val viaje = listaViajes[index]
+                    ViajeItem(
+                        viaje = viaje,
+                        isSelected = viaje.id == viajeSeleccionadoId,
+                        puntos = puntosViaje,
+                        onClick = { onViajeClick(viaje.id) }
+                    )
                 }
             }
 
@@ -499,21 +535,31 @@ fun DashboardScreen(
 }
 
 @Composable
-fun ViajeItem(viaje: Trayecto) {
+fun ViajeItem(viaje: Trayecto, isSelected: Boolean, puntos: List<Float>, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-        border = BorderStroke(1.dp, Color.Gray.copy(0.2f))
+        border = BorderStroke(1.dp, if (isSelected) Color.Cyan.copy(0.5f) else Color.Gray.copy(0.2f))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("ID: #${viaje.id}", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                Text("ID: #${viaje.id}", fontWeight = FontWeight.Bold, color = if (isSelected) Color.Cyan else Color.White, fontSize = 14.sp)
                 Text("Duración: ${viaje.duracion}s", color = Color.Cyan, fontSize = 12.sp)
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text("Media: ${String.format(Locale.US, "%.1f", viaje.tempMedia)}°C", color = Color.LightGray, fontSize = 12.sp)
                 Text("D. Mínima: ${String.format(Locale.US, "%.1f", viaje.distMin)}cm", color = Color.LightGray, fontSize = 12.sp)
+            }
+
+            if (isSelected) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Análisis Térmico del Trayecto", fontWeight = FontWeight.Bold, color = Color.Cyan, fontSize = 12.sp)
+                if (puntos.isEmpty()) {
+                    Text("No hay datos registrados para este viaje.", color = Color.DarkGray, fontSize = 11.sp, modifier = Modifier.padding(vertical = 8.dp))
+                } else {
+                    GraficaRealTime(puntos)
+                }
             }
         }
     }
