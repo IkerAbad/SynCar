@@ -23,6 +23,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -32,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.syncar.ui.theme.SynCarTheme
 
-// --- PALETA DE COLORES PROFESIONAL ---
+// --- PALETA DE COLORES PROFESIONAL (SynCar Branding) ---
 val DarkBg = Color(0xFF010409)
 val SurfaceCard = Color(0xFF0D1117)
 val BorderColor = Color(0xFF30363D)
@@ -135,7 +137,7 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
         Icon(
             Icons.Default.DirectionsCar,
             contentDescription = null,
-            modifier = Modifier.size(72.dp),
+            modifier = Modifier.size(80.dp),
             tint = PrimaryCyan
         )
         Spacer(modifier = Modifier.height(16.dp))
@@ -145,7 +147,7 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
             color = TextPrimary,
             fontWeight = FontWeight.Bold
         )
-        Text("Gestión de Telemetría", color = TextSecondary, fontSize = 14.sp)
+        Text("Gestión de Telemetría Automotriz", color = TextSecondary, fontSize = 14.sp)
         
         Spacer(modifier = Modifier.height(48.dp))
         
@@ -154,7 +156,7 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
             onValueChange = { user = it },
             label = { Text("Usuario") },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = PrimaryCyan,
                 unfocusedBorderColor = BorderColor,
@@ -165,14 +167,14 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
             )
         )
         
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         
         OutlinedTextField(
             value = pass,
             onValueChange = { pass = it },
             label = { Text("Contraseña") },
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = PrimaryCyan,
                 unfocusedBorderColor = BorderColor,
@@ -187,11 +189,12 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
         
         Button(
             onClick = { onLoginSuccess(user, pass) },
-            modifier = Modifier.fillMaxWidth().height(56.dp),
+            modifier = Modifier.fillMaxWidth().height(60.dp),
             colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(16.dp),
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
         ) {
-            Text("ENTRAR AL PANEL", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+            Text("ACCEDER AL PANEL", fontWeight = FontWeight.Black, letterSpacing = 1.2.sp)
         }
     }
 }
@@ -231,33 +234,56 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
                         viewModel.bleStatus,
                         fontSize = 12.sp,
                         color = TextSecondary,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
             IconButton(
                 onClick = onLogout,
-                modifier = Modifier.background(SurfaceCard, CircleShape).border(1.dp, BorderColor, CircleShape)
+                modifier = Modifier
+                    .background(SurfaceCard, CircleShape)
+                    .border(1.dp, BorderColor, CircleShape)
             ) {
-                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Cerrar sesión", tint = TextSecondary, modifier = Modifier.size(20.dp))
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+
+        // --- ALERT SYSTEM ---
+        viewModel.alertMessage?.let { msg ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = if (viewModel.isCriticalAlert) ErrorRed.copy(alpha = 0.15f) else PrimaryCyan.copy(alpha = 0.1f)),
+                border = BorderStroke(1.dp, if (viewModel.isCriticalAlert) ErrorRed else PrimaryCyan),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(if (viewModel.isCriticalAlert) Icons.Default.Warning else Icons.Default.Info, contentDescription = null, tint = if (viewModel.isCriticalAlert) ErrorRed else PrimaryCyan)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(msg, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { viewModel.dismissAlert() }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
 
         // --- SENSOR GRID ---
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             SensorCard(
                 modifier = Modifier.weight(1f),
                 title = "TEMPERATURA",
-                value = "${viewModel.tempActual}°C",
+                value = viewModel.tempActual,
+                unit = "°C",
                 icon = Icons.Default.Thermostat,
                 color = PrimaryCyan
             )
             SensorCard(
                 modifier = Modifier.weight(1f),
                 title = "HUMEDAD",
-                value = "${viewModel.humActual}%",
+                value = viewModel.humActual,
+                unit = "%",
                 icon = Icons.Default.WaterDrop,
                 color = PrimaryCyan
             )
@@ -268,7 +294,8 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         SensorCard(
             modifier = Modifier.fillMaxWidth(),
             title = "DISTANCIA DE SEGURIDAD",
-            value = "${viewModel.distActual} cm",
+            value = viewModel.distActual,
+            unit = "cm",
             icon = Icons.Default.Radar,
             color = if ((viewModel.distActual.toFloatOrNull() ?: 100f) < 30f) ErrorRed else SuccessGreen
         )
@@ -276,32 +303,30 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         Spacer(modifier = Modifier.height(24.dp))
 
         // --- GRÁFICA EN TIEMPO REAL ---
-        Text("GRÁFICA DE TEMPERATURA", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-        Spacer(modifier = Modifier.height(8.dp))
+        Text("TELEMETRÍA EN TIEMPO REAL (TEMP)", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
         RealTimeGraph(
             puntos = viewModel.listaPuntosGrafica,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(140.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(SurfaceCard)
-                .border(1.dp, BorderColor, RoundedCornerShape(16.dp))
+                .border(1.dp, BorderColor, RoundedCornerShape(20.dp))
                 .padding(16.dp)
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // --- CONTROLES DE VIAJE ---
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(SurfaceCard)
-                .border(1.dp, BorderColor, RoundedCornerShape(20.dp))
-                .padding(16.dp)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+            border = BorderStroke(1.dp, BorderColor),
+            shape = RoundedCornerShape(20.dp)
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -320,12 +345,13 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (viewModel.isJourneyActive) ErrorRed else SuccessGreen
                     ),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                 ) {
-                    Icon(if (viewModel.isJourneyActive) Icons.Default.Stop else Icons.Default.PlayArrow, null)
+                    Icon(if (viewModel.isJourneyActive) Icons.Default.Stop else Icons.Default.PlayArrow, null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (viewModel.isJourneyActive) "FINALIZAR" else "INICIAR", fontWeight = FontWeight.Bold)
+                    Text(if (viewModel.isJourneyActive) "FINALIZAR" else "INICIAR", fontWeight = FontWeight.Black)
                 }
             }
         }
@@ -339,17 +365,19 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
             contentColor = PrimaryCyan,
             divider = {},
             indicator = { tabPositions ->
-                TabRowDefaults.SecondaryIndicator(
-                    Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                    color = PrimaryCyan
-                )
+                if (selectedTab < tabPositions.size) {
+                    TabRowDefaults.SecondaryIndicator(
+                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                        color = PrimaryCyan
+                    )
+                }
             }
         ) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("VIAJES", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("HISTORIAL VIAJES", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("LOGS VIVO", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("LOGS EN VIVO", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
         
@@ -374,24 +402,36 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
 }
 
 @Composable
-fun SensorCard(modifier: Modifier, title: String, value: String, icon: ImageVector, color: Color) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceCard)
-            .border(1.dp, BorderColor, RoundedCornerShape(16.dp))
-            .padding(16.dp)
+fun SensorCard(modifier: Modifier, title: String, value: String, unit: String, icon: ImageVector, color: Color) {
+    val isDataAvailable = value != SynCarFormatter.NO_DATA && value != SynCarFormatter.WAITING
+    
+    Card(
+        modifier = modifier.shadow(elevation = 8.dp, shape = RoundedCornerShape(16.dp), spotColor = color.copy(alpha = 0.5f)),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        border = BorderStroke(1.dp, if (isDataAvailable) color.copy(alpha = 0.5f) else BorderColor),
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Column {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+        Column(modifier = Modifier.padding(16.dp)) {
+            Icon(icon, contentDescription = null, tint = if (isDataAvailable) color else TextSecondary, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.height(12.dp))
-            Text(title, fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
-            Text(
-                value,
-                fontSize = 24.sp,
-                color = TextPrimary,
-                fontWeight = FontWeight.ExtraBold
-            )
+            Text(title, fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = value,
+                    fontSize = if (isDataAvailable) 28.sp else 16.sp, // Ajuste dinámico de tamaño
+                    color = if (isDataAvailable) TextPrimary else TextSecondary.copy(alpha = 0.5f),
+                    fontWeight = FontWeight.ExtraBold
+                )
+                if (isDataAvailable) {
+                    Text(
+                        text = " $unit",
+                        fontSize = 14.sp,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
@@ -417,6 +457,21 @@ fun RealTimeGraph(puntos: List<Float>, modifier: Modifier) {
             }
         }
         
+        // Efecto de brillo bajo la línea (opcional pero profesional)
+        val fillPath = Path().apply {
+            addPath(path)
+            lineTo(width, height)
+            lineTo(0f, height)
+            close()
+        }
+        
+        drawPath(
+            path = fillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(PrimaryCyan.copy(alpha = 0.2f), Color.Transparent)
+            )
+        )
+        
         drawPath(
             path = path,
             color = PrimaryCyan,
@@ -429,34 +484,71 @@ fun RealTimeGraph(puntos: List<Float>, modifier: Modifier) {
 fun JourneyList(viewModel: SynCarViewModel) {
     if (viewModel.listaViajes.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No hay viajes registrados", color = TextSecondary, fontSize = 14.sp)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Inbox, null, tint = BorderColor, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(8.dp))
+                Text("No hay viajes registrados", color = TextSecondary, fontSize = 14.sp)
+            }
         }
     } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
             items(viewModel.listaViajes) { viaje ->
                 val estados = evaluarTrayecto(viaje)
                 val colorEstado = obtenerColorPrioritario(estados)
+                val isSelected = viewModel.viajeSeleccionadoId == viaje.id
                 
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { viewModel.cargarGraficaViaje(viaje.id) },
-                    colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                    border = BorderStroke(1.dp, if (viewModel.viajeSeleccionadoId == viaje.id) PrimaryCyan else BorderColor),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = CardDefaults.cardColors(containerColor = if (isSelected) SurfaceCard.copy(alpha = 0.5f) else SurfaceCard),
+                    border = BorderStroke(1.dp, if (isSelected) PrimaryCyan else BorderColor),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(colorEstado))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Viaje #${viaje.id}", fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text("${viaje.duracion}s | Media: ${viaje.tempMedia}°C", color = TextSecondary, fontSize = 11.sp)
+                    Column {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(colorEstado)
+                                    .border(2.dp, colorEstado.copy(alpha = 0.3f), CircleShape)
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Viaje #${viaje.id}", fontWeight = FontWeight.Black, color = TextPrimary, fontSize = 16.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Timer, null, tint = TextSecondary, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("${viaje.duracion}s", color = TextSecondary, fontSize = 12.sp)
+                                    Spacer(Modifier.width(12.dp))
+                                    Icon(Icons.Default.Thermostat, null, tint = TextSecondary, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    // Formateo manual para medias históricas
+                                    Text("Med: %.1f°C".format(viaje.tempMedia), color = TextSecondary, fontSize = 12.sp)
+                                }
+                            }
+                            // Badge de estado
+                            Surface(
+                                color = colorEstado.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = estados.firstOrNull()?.texto ?: "Normal",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    color = colorEstado,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
-                        Icon(Icons.Default.ChevronRight, null, tint = TextSecondary)
-                    }
-                    if (viewModel.viajeSeleccionadoId == viaje.id) {
-                        RealTimeGraph(
-                            puntos = viewModel.puntosGraficaViaje,
-                            modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
+                        if (isSelected) {
+                            HorizontalDivider(color = BorderColor, modifier = Modifier.padding(horizontal = 16.dp))
+                            Box(modifier = Modifier.padding(16.dp)) {
+                                RealTimeGraph(
+                                    puntos = viewModel.puntosGraficaViaje,
+                                    modifier = Modifier.fillMaxWidth().height(80.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -466,32 +558,51 @@ fun JourneyList(viewModel: SynCarViewModel) {
 
 @Composable
 fun LiveLogList(logs: List<String>) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        items(logs) { text ->
-            val type = text.split(":")[0].trim()
-            val value = if (text.contains(":")) text.split(":")[1].trim() else text
-            
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    when(type) {
-                        "TEMP" -> Icons.Default.Thermostat
-                        "DIST" -> Icons.Default.Radar
-                        "HUM" -> Icons.Default.WaterDrop
-                        else -> Icons.Default.Info
-                    },
-                    contentDescription = null,
-                    tint = PrimaryCyan,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(type, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Spacer(Modifier.weight(1f))
-                Text(value, fontSize = 11.sp, color = TextSecondary)
+    if (logs.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Esperando datos...", color = TextSecondary, fontSize = 12.sp)
+        }
+    } else {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+            items(logs) { text ->
+                val type = text.split(":")[0].trim()
+                val value = if (text.contains(":")) text.split(":")[1].trim() else text
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                    border = BorderStroke(0.5.dp, BorderColor.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            modifier = Modifier.size(28.dp),
+                            color = PrimaryCyan.copy(alpha = 0.1f),
+                            shape = CircleShape
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    when(type) {
+                                        "TEMP" -> Icons.Default.Thermostat
+                                        "DIST" -> Icons.Default.Radar
+                                        "HUM" -> Icons.Default.WaterDrop
+                                        else -> Icons.Default.Info
+                                    },
+                                    contentDescription = null,
+                                    tint = PrimaryCyan,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Text(type, fontSize = 12.sp, fontWeight = FontWeight.Black, color = TextPrimary)
+                        Spacer(Modifier.weight(1f))
+                        Text(value, fontSize = 13.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
-            HorizontalDivider(color = BorderColor.copy(alpha = 0.5f))
         }
     }
 }

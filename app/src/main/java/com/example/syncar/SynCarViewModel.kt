@@ -1,11 +1,36 @@
 package com.example.syncar
 
 import androidx.compose.runtime.*
-import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import java.util.*
+
+/**
+ * Helper de formateo centralizado para garantizar coherencia en toda la App.
+ */
+object SynCarFormatter {
+    const val NO_DATA = "Sin datos"
+    const val WAITING = "Esperando sensor"
+
+    fun formatValue(type: String, value: Float?): String {
+        if (value == null || value.isNaN()) return NO_DATA
+        return when (type.uppercase()) {
+            "TEMP" -> "%.1f".format(Locale.US, value)
+            "HUM" -> "%.0f".format(Locale.US, value)
+            "DIST" -> "%.0f".format(Locale.US, value)
+            else -> "%.1f".format(Locale.US, value)
+        }
+    }
+
+    fun formatLog(rawLog: String): String {
+        val parts = rawLog.split(":")
+        if (parts.size != 2) return rawLog
+        val type = parts[0].trim()
+        val value = parts[1].trim().replace(",", ".").toFloatOrNull()
+        return "$type: ${formatValue(type, value)}"
+    }
+}
 
 enum class TipoEstado { RIESGO_TERMICO, DISTANCIA_PELIGROSA, NORMAL }
 data class EstadoTrayecto(val tipo: TipoEstado, val texto: String, val color: Color)
@@ -13,10 +38,10 @@ data class Trayecto(val id: Int, val duracion: Int, val tempMedia: Float, val di
 
 class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
 
-    // --- ESTADOS REACTIVOS (Encapsulados con private set) ---
-    var tempActual by mutableStateOf("--") ; private set
-    var humActual by mutableStateOf("--") ; private set
-    var distActual by mutableStateOf("--") ; private set
+    // --- ESTADOS REACTIVOS ---
+    var tempActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
+    var humActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
+    var distActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
     var bleStatus by mutableStateOf("Desconectado") ; private set
 
     var alertMessage by mutableStateOf<String?>(null) ; private set
@@ -63,28 +88,34 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
                 else if (tipo == "DIST") journeyDists.add(it)
             }
         }
-        actualizarUI(tipo, valorStr, valorFloat)
+        actualizarUI(tipo, valorFloat)
     }
 
-    private fun actualizarUI(tipo: String, texto: String, valor: Float?) {
+    private fun actualizarUI(tipo: String, valor: Float?) {
         val v = valor ?: 0f
+        val displayValue = SynCarFormatter.formatValue(tipo, valor)
+        
         when (tipo) {
             "TEMP" -> {
-                tempActual = texto
+                tempActual = displayValue
                 listaPuntosGrafica.add(v)
                 if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
-                if (v > 35f) { alertMessage = "¡PELIGRO! Temperatura crítica: $texto°C"; isCriticalAlert = true }
+                if (v > 35f) { 
+                    alertMessage = "¡PELIGRO! Temperatura crítica: $displayValue°C"
+                    isCriticalAlert = true 
+                }
             }
             "DIST" -> {
-                distActual = texto
+                distActual = displayValue
                 if (v < 30f && v > 0f) {
-                    alertMessage = "¡AVISO! Distancia reducida: $texto cm"
+                    alertMessage = "¡AVISO! Distancia reducida: $displayValue cm"
                     isCriticalAlert = v < 15f
                 }
             }
-            "HUM" -> humActual = texto
+            "HUM" -> humActual = displayValue
         }
-        listaHistorial.add(0, "$tipo: $texto")
+        
+        listaHistorial.add(0, "$tipo: $displayValue")
         if (listaHistorial.size > 15) listaHistorial.removeAt(listaHistorial.size - 1)
     }
 
@@ -117,7 +148,10 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
 
     fun inicializarApp() {
         if (listaViajes.isEmpty()) cargarHistorial()
-        listaHistorial.addAll(repository.obtenerHistorialTelemetriaReciente())
+        // Cargamos y formateamos el historial reciente
+        val logs = repository.obtenerHistorialTelemetriaReciente()
+        listaHistorial.clear()
+        listaHistorial.addAll(logs.map { SynCarFormatter.formatLog(it) })
         listaPuntosGrafica.addAll(repository.obtenerPuntosTemperaturaGrafica())
     }
 
@@ -127,7 +161,12 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     }
 
     fun logout() {
-        isLoggedIn = false ; alertMessage = null ; tempActual = "--" ; listaHistorial.clear()
+        isLoggedIn = false 
+        alertMessage = null 
+        tempActual = SynCarFormatter.WAITING
+        humActual = SynCarFormatter.WAITING
+        distActual = SynCarFormatter.WAITING
+        listaHistorial.clear()
     }
 
     fun dismissAlert() { alertMessage = null ; isCriticalAlert = false }
@@ -137,7 +176,6 @@ class SynCarViewModelFactory(private val repository: SynCarRepository) : ViewMod
     override fun <T : ViewModel> create(modelClass: Class<T>): T = SynCarViewModel(repository) as T
 }
 
-// Lógica de evaluación pura (fuera del Composable)
 fun evaluarTrayecto(viaje: Trayecto): List<EstadoTrayecto> {
     val estados = mutableListOf<EstadoTrayecto>()
     if (viaje.tempMedia > 35f) estados.add(EstadoTrayecto(TipoEstado.RIESGO_TERMICO, "Riesgo térmico", Color(0xFFD32F2F)))
