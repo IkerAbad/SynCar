@@ -239,7 +239,14 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(if (viewModel.bleStatus.contains("Conectado")) SuccessGreen else ErrorRed)
+                            .background(
+                                when {
+                                    viewModel.bleStatus == "RECEIVING DATA" -> SuccessGreen
+                                    viewModel.bleStatus == "CONNECTED" -> PrimaryCyan
+                                    viewModel.bleStatus == "CONNECTING" -> WarningOrange
+                                    else -> ErrorRed
+                                }
+                            )
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -275,8 +282,8 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         ) {
             AnimatedVisibility(
                 visible = viewModel.alertMessage != null,
-                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut()
             ) {
                 viewModel.alertMessage?.let { msg ->
                     Card(
@@ -381,11 +388,11 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
             StatusCard(
                 modifier = Modifier.weight(1f),
                 title = "CONEXIÓN BLE",
-                isActive = viewModel.bleStatus.contains("Conectado"),
-                activeText = "LINK",
-                inactiveText = "LOST",
+                isActive = viewModel.bleStatus == "RECEIVING DATA" || viewModel.bleStatus == "CONNECTED",
+                activeText = viewModel.bleStatus,
+                inactiveText = viewModel.bleStatus,
                 icon = Icons.Default.Bluetooth,
-                activeColor = PrimaryCyan
+                activeColor = if (viewModel.bleStatus == "RECEIVING DATA") SuccessGreen else PrimaryCyan
             )
         }
 
