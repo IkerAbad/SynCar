@@ -29,23 +29,16 @@ class BleManager(
     private val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     fun startScan() {
-        if (!hasPermissions()) {
-            Log.e("BLE", "Faltan permisos para escanear")
-            return
-        }
+        if (!hasPermissions()) return
         scanner?.startScan(scanCallback)
     }
 
     fun stopScan() {
-        if (hasPermissions()) {
-            scanner?.stopScan(scanCallback)
-        }
+        if (hasPermissions()) scanner?.stopScan(scanCallback)
     }
 
     fun disconnect() {
-        if (hasPermissions()) {
-            bluetoothGatt?.close()
-        }
+        if (hasPermissions()) bluetoothGatt?.close()
         bluetoothGatt = null
     }
 
@@ -54,11 +47,12 @@ class BleManager(
         val service = bluetoothGatt?.getService(SERVICE_UUID)
         val char = service?.getCharacteristic(CHARACTERISTIC_UUID)
         if (char != null) {
+            val bytes = data.toByteArray()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                bluetoothGatt?.writeCharacteristic(char, data.toByteArray(), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+                bluetoothGatt?.writeCharacteristic(char, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
             } else {
                 @Suppress("DEPRECATION")
-                char.value = data.toByteArray()
+                char.value = bytes
                 @Suppress("DEPRECATION")
                 bluetoothGatt?.writeCharacteristic(char)
             }
@@ -77,18 +71,11 @@ class BleManager(
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val deviceName = if (hasPermissions()) result.device.name else null
-            Log.d("BLE", "Dispositivo encontrado: $deviceName")
             if (deviceName == "SynCar") {
                 onStatusChanged("CONNECTING")
                 stopScan()
-                if (hasPermissions()) {
-                    bluetoothGatt = result.device.connectGatt(context, false, gattCallback)
-                }
+                if (hasPermissions()) bluetoothGatt = result.device.connectGatt(context, false, gattCallback)
             }
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            onStatusChanged("Escaneo fallido: $errorCode")
         }
     }
 
@@ -107,12 +94,10 @@ class BleManager(
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 val service = gatt.getService(SERVICE_UUID)
                 val char = service?.getCharacteristic(CHARACTERISTIC_UUID)
-
                 if (char != null && hasPermissions()) {
                     onStatusChanged("RECEIVING DATA")
                     gatt.setCharacteristicNotification(char, true)
-                    val descriptor = char.getDescriptor(CCCD_UUID)
-                    descriptor?.let {
+                    char.getDescriptor(CCCD_UUID)?.let {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             gatt.writeDescriptor(it, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                         } else {
@@ -122,28 +107,18 @@ class BleManager(
                             gatt.writeDescriptor(it)
                         }
                     }
-                } else {
-                    onStatusChanged("Error: Característica no encontrada")
                 }
-            } else {
-                onStatusChanged("Error al descubrir servicios: $status")
             }
         }
 
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            value: ByteArray
-        ) {
-            val raw = String(value)
-            onDataReceived(raw)
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            onDataReceived(String(value))
         }
 
-        @Deprecated("Deprecated in Java")
+        @Deprecated("Deprecated")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             @Suppress("DEPRECATION")
-            val raw = String(characteristic.value ?: byteArrayOf())
-            onDataReceived(raw)
+            onDataReceived(String(characteristic.value ?: byteArrayOf()))
         }
     }
 }
