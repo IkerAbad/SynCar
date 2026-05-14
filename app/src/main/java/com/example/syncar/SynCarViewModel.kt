@@ -4,6 +4,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.*
 
 /**
@@ -42,7 +45,7 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     var tempActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
     var humActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
     var distActual by mutableStateOf(SynCarFormatter.WAITING) ; private set
-    var bleStatus by mutableStateOf("Desconectado") ; private set
+    var bleStatus by mutableStateOf("DISCONNECTED") ; private set
 
     var alertMessage by mutableStateOf<String?>(null) ; private set
     var isCriticalAlert by mutableStateOf(false) ; private set
@@ -64,6 +67,21 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     val listaViajes = mutableStateListOf<Trayecto>()
     var viajeSeleccionadoId by mutableStateOf(-1) ; private set
     val puntosGraficaViaje = mutableStateListOf<Float>()
+
+    // --- LÓGICA DE DETECCIÓN DE DESCONEXIÓN ---
+    private var lastDataTime: Long = 0L
+
+    init {
+        // Corrutina para verificar timeout de datos (Heartbeat)
+        viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                if (bleStatus == "RECEIVING DATA" && System.currentTimeMillis() - lastDataTime > 3500) {
+                    bleStatus = "DISCONNECTED"
+                }
+            }
+        }
+    }
 
     // --- LÓGICA DE TRAYECTO ---
     var isJourneyActive by mutableStateOf(false) ; private set
@@ -90,6 +108,13 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     fun procesarDatoRecibido(raw: String) {
         val limpio = raw.trim().replace("\u0000", "")
         lastReceivedData = limpio
+        lastDataTime = System.currentTimeMillis()
+        
+        // Si estábamos en DISCONNECTED y llegan datos, volver a RECEIVING DATA
+        if (bleStatus == "DISCONNECTED" || bleStatus == "CONNECTED") {
+            bleStatus = "RECEIVING DATA"
+        }
+
         val partes = limpio.split(":")
         val tipo = if (partes.size == 2) partes[0].trim().uppercase() else "TEMP"
         val valorStr = if (partes.size == 2) partes[1].trim() else limpio
