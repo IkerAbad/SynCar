@@ -79,7 +79,7 @@ class BleManager(
             val deviceName = if (hasPermissions()) result.device.name else null
             Log.d("BLE", "Dispositivo encontrado: $deviceName")
             if (deviceName == "SynCar") {
-                onStatusChanged("Conectando a SynCar...")
+                onStatusChanged("CONNECTING")
                 stopScan()
                 if (hasPermissions()) {
                     bluetoothGatt = result.device.connectGatt(context, false, gattCallback)
@@ -95,10 +95,10 @@ class BleManager(
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                onStatusChanged("Conectado. Descubriendo servicios...")
+                onStatusChanged("CONNECTED")
                 if (hasPermissions()) gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                onStatusChanged("Desconectado. Reintentando escaneo...")
+                onStatusChanged("DISCONNECTED")
                 startScan()
             }
         }
@@ -109,7 +109,7 @@ class BleManager(
                 val char = service?.getCharacteristic(CHARACTERISTIC_UUID)
 
                 if (char != null && hasPermissions()) {
-                    onStatusChanged("Servicios listos. Recibiendo datos...")
+                    onStatusChanged("RECEIVING DATA")
                     gatt.setCharacteristicNotification(char, true)
                     val descriptor = char.getDescriptor(CCCD_UUID)
                     descriptor?.let {
