@@ -48,10 +48,20 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     var isCriticalAlert by mutableStateOf(false) ; private set
     var isLoggedIn by mutableStateOf(false) ; private set
 
-    val listaHistorial = mutableStateListOf<String>()
-    val listaPuntosGrafica = mutableStateListOf<Float>()
-    val listaViajes = mutableStateListOf<Trayecto>()
+    // Nuevos estados para Dashboard extendido
+    var isParkingActive by mutableStateOf(false) ; private set
+    var isSystemActive by mutableStateOf(true) ; private set
+    var lastReceivedData by mutableStateOf("Ninguno") ; private set
+    var selectedChartType by mutableStateOf("TEMP") ; private set
 
+    val listaHistorial = mutableStateListOf<String>()
+    
+    // Puntos para gráficas
+    val puntosTemp = mutableStateListOf<Float>()
+    val puntosHum = mutableStateListOf<Float>()
+    val puntosDist = mutableStateListOf<Float>()
+    
+    val listaViajes = mutableStateListOf<Trayecto>()
     var viajeSeleccionadoId by mutableStateOf(-1) ; private set
     val puntosGraficaViaje = mutableStateListOf<Float>()
 
@@ -62,6 +72,9 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
     private var startTimeMillis: Long = 0L
     private val journeyTemps = mutableListOf<Float>()
     private val journeyDists = mutableListOf<Float>()
+
+    // Callback para enviar comandos via BLE (se asignará en MainActivity)
+    var onSendCommand: ((String) -> Unit)? = null
 
     fun setStatus(status: String) { bleStatus = status }
 
@@ -76,6 +89,7 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
 
     fun procesarDatoRecibido(raw: String) {
         val limpio = raw.trim().replace("\u0000", "")
+        lastReceivedData = limpio
         val partes = limpio.split(":")
         val tipo = if (partes.size == 2) partes[0].trim().uppercase() else "TEMP"
         val valorStr = if (partes.size == 2) partes[1].trim() else limpio
@@ -98,25 +112,54 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
         when (tipo) {
             "TEMP" -> {
                 tempActual = displayValue
-                listaPuntosGrafica.add(v)
-                if (listaPuntosGrafica.size > 20) listaPuntosGrafica.removeAt(0)
+                puntosTemp.add(v)
+                if (puntosTemp.size > 20) puntosTemp.removeAt(0)
                 if (v > 35f) { 
                     alertMessage = "¡PELIGRO! Temperatura crítica: $displayValue°C"
                     isCriticalAlert = true 
+                } else if (isCriticalAlert && tipo == "TEMP") {
+                    dismissAlert()
                 }
             }
             "DIST" -> {
                 distActual = displayValue
-                if (v < 30f && v > 0f) {
+                puntosDist.add(v)
+                if (puntosDist.size > 20) puntosDist.removeAt(0)
+                if (v < 15f && v > 0f) {
+                    alertMessage = "¡CRÍTICO! Obstáculo muy cerca: $displayValue cm"
+                    isCriticalAlert = true
+                } else if (v < 30f && v >= 15f) {
                     alertMessage = "¡AVISO! Distancia reducida: $displayValue cm"
-                    isCriticalAlert = v < 15f
+                    isCriticalAlert = false
                 }
             }
-            "HUM" -> humActual = displayValue
+            "HUM" -> {
+                humActual = displayValue
+                puntosHum.add(v)
+                if (puntosHum.size > 20) puntosHum.removeAt(0)
+            }
         }
         
         listaHistorial.add(0, "$tipo: $displayValue")
         if (listaHistorial.size > 15) listaHistorial.removeAt(listaHistorial.size - 1)
+    }
+
+    fun toggleParking() {
+        isParkingActive = !isParkingActive
+        onSendCommand?.invoke(if (isParkingActive) "PARKING_ON" else "PARKING_OFF")
+    }
+
+    fun toggleSystem() {
+        isSystemActive = !isSystemActive
+        onSendCommand?.invoke(if (isSystemActive) "SYSTEM_ON" else "SYSTEM_OFF")
+    }
+
+    fun testBuzzer() {
+        onSendCommand?.invoke("BUZZER_TEST")
+    }
+
+    fun setChartType(type: String) {
+        selectedChartType = type
     }
 
     fun iniciarTrayecto() {
@@ -148,11 +191,12 @@ class SynCarViewModel(private val repository: SynCarRepository) : ViewModel() {
 
     fun inicializarApp() {
         if (listaViajes.isEmpty()) cargarHistorial()
-        // Cargamos y formateamos el historial reciente
         val logs = repository.obtenerHistorialTelemetriaReciente()
         listaHistorial.clear()
         listaHistorial.addAll(logs.map { SynCarFormatter.formatLog(it) })
-        listaPuntosGrafica.addAll(repository.obtenerPuntosTemperaturaGrafica())
+        
+        puntosTemp.clear()
+        puntosTemp.addAll(repository.obtenerPuntosTemperaturaGrafica())
     }
 
     private fun cargarHistorial() {

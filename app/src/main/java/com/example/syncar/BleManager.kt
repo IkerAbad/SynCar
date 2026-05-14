@@ -49,6 +49,22 @@ class BleManager(
         bluetoothGatt = null
     }
 
+    fun sendData(data: String) {
+        if (!hasPermissions()) return
+        val service = bluetoothGatt?.getService(SERVICE_UUID)
+        val char = service?.getCharacteristic(CHARACTERISTIC_UUID)
+        if (char != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                bluetoothGatt?.writeCharacteristic(char, data.toByteArray(), BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            } else {
+                @Suppress("DEPRECATION")
+                char.value = data.toByteArray()
+                @Suppress("DEPRECATION")
+                bluetoothGatt?.writeCharacteristic(char)
+            }
+        }
+    }
+
     private fun hasPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
