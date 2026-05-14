@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.compose.animation.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -266,24 +267,62 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // --- ALERT SYSTEM ---
-        viewModel.alertMessage?.let { msg ->
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = if (viewModel.isCriticalAlert) ErrorRed.copy(alpha = 0.15f) else WarningOrange.copy(alpha = 0.1f)),
-                border = BorderStroke(1.dp, if (viewModel.isCriticalAlert) ErrorRed else WarningOrange),
-                shape = RoundedCornerShape(12.dp)
+        // --- ALERT SYSTEM (Fixed Layout) ---
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp) // Altura fija para evitar que el layout se desplace
+        ) {
+            AnimatedVisibility(
+                visible = viewModel.alertMessage != null,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
             ) {
-                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (viewModel.isCriticalAlert) Icons.Default.Warning else Icons.Default.Info, contentDescription = null, tint = if (viewModel.isCriticalAlert) ErrorRed else WarningOrange)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(msg, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { viewModel.dismissAlert() }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                viewModel.alertMessage?.let { msg ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (viewModel.isCriticalAlert) ErrorRed.copy(alpha = 0.15f) else WarningOrange.copy(alpha = 0.1f)
+                        ),
+                        border = BorderStroke(1.dp, if (viewModel.isCriticalAlert) ErrorRed else WarningOrange),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                if (viewModel.isCriticalAlert) Icons.Default.Warning else Icons.Default.Info,
+                                contentDescription = null,
+                                tint = if (viewModel.isCriticalAlert) ErrorRed else WarningOrange
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = msg,
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2
+                            )
+                            IconButton(
+                                onClick = { viewModel.dismissAlert() },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         // --- SENSOR GRID ---
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
