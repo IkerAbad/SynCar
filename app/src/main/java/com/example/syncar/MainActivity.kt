@@ -10,12 +10,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -40,6 +43,7 @@ val SurfaceCard = Color(0xFF0D1117)
 val BorderColor = Color(0xFF30363D)
 val PrimaryCyan = Color(0xFF58A6FF)
 val SuccessGreen = Color(0xFF3FB950)
+val WarningOrange = Color(0xFFD29922)
 val ErrorRed = Color(0xFFF85149)
 val TextPrimary = Color(0xFFF0F6FC)
 val TextSecondary = Color(0xFF8B949E)
@@ -71,6 +75,11 @@ class MainActivity : ComponentActivity() {
             onStatusChanged = { viewModel.setStatus(it) },
             onDataReceived = { viewModel.procesarDatoRecibido(it) }
         )
+        
+        // Link ViewModel to BleManager for sending commands
+        viewModel.onSendCommand = { command ->
+            bleManager.sendData(command)
+        }
 
         setContent {
             SynCarTheme(darkTheme = true) {
@@ -199,6 +208,7 @@ fun LoginScreen(onLoginSuccess: (String, String) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -206,6 +216,7 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(top = 48.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
     ) {
         // --- HEADER ---
@@ -237,6 +248,11 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+                Text(
+                    "Último dato: ${viewModel.lastReceivedData}",
+                    fontSize = 10.sp,
+                    color = TextSecondary.copy(alpha = 0.7f)
+                )
             }
             IconButton(
                 onClick = onLogout,
@@ -254,12 +270,12 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         viewModel.alertMessage?.let { msg ->
             Card(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = if (viewModel.isCriticalAlert) ErrorRed.copy(alpha = 0.15f) else PrimaryCyan.copy(alpha = 0.1f)),
-                border = BorderStroke(1.dp, if (viewModel.isCriticalAlert) ErrorRed else PrimaryCyan),
+                colors = CardDefaults.cardColors(containerColor = if (viewModel.isCriticalAlert) ErrorRed.copy(alpha = 0.15f) else WarningOrange.copy(alpha = 0.1f)),
+                border = BorderStroke(1.dp, if (viewModel.isCriticalAlert) ErrorRed else WarningOrange),
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (viewModel.isCriticalAlert) Icons.Default.Warning else Icons.Default.Info, contentDescription = null, tint = if (viewModel.isCriticalAlert) ErrorRed else PrimaryCyan)
+                    Icon(if (viewModel.isCriticalAlert) Icons.Default.Warning else Icons.Default.Info, contentDescription = null, tint = if (viewModel.isCriticalAlert) ErrorRed else WarningOrange)
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(msg, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                     IconButton(onClick = { viewModel.dismissAlert() }, modifier = Modifier.size(24.dp)) {
@@ -291,25 +307,103 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         
         Spacer(modifier = Modifier.height(12.dp))
         
-        SensorCard(
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            SensorCard(
+                modifier = Modifier.weight(1f),
+                title = "DISTANCIA",
+                value = viewModel.distActual,
+                unit = "cm",
+                icon = Icons.Default.Radar,
+                color = if ((viewModel.distActual.toFloatOrNull() ?: 100f) < 30f) ErrorRed else SuccessGreen
+            )
+            StatusCard(
+                modifier = Modifier.weight(1f),
+                title = "PARKING",
+                isActive = viewModel.isParkingActive,
+                activeText = "ACTIVADO",
+                inactiveText = "DESACTIVADO",
+                icon = Icons.Default.LocalParking,
+                activeColor = SuccessGreen
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatusCard(
+                modifier = Modifier.weight(1f),
+                title = "SISTEMA",
+                isActive = viewModel.isSystemActive,
+                activeText = "ONLINE",
+                inactiveText = "OFFLINE",
+                icon = Icons.Default.PowerSettingsNew,
+                activeColor = SuccessGreen
+            )
+            StatusCard(
+                modifier = Modifier.weight(1f),
+                title = "CONEXIÓN BLE",
+                isActive = viewModel.bleStatus.contains("Conectado"),
+                activeText = "LINK",
+                inactiveText = "LOST",
+                icon = Icons.Default.Bluetooth,
+                activeColor = PrimaryCyan
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // --- CONTROLES DE ACCIÓN ---
+        Text("CONTROLES DEL VEHÍCULO", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            title = "DISTANCIA DE SEGURIDAD",
-            value = viewModel.distActual,
-            unit = "cm",
-            icon = Icons.Default.Radar,
-            color = if ((viewModel.distActual.toFloatOrNull() ?: 100f) < 30f) ErrorRed else SuccessGreen
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            maxItemsInEachRow = 3
+        ) {
+            ControlButton(
+                text = if (viewModel.isParkingActive) "Parking Off" else "Parking On",
+                icon = Icons.Default.LocalParking,
+                onClick = { viewModel.toggleParking() },
+                color = if (viewModel.isParkingActive) ErrorRed else SuccessGreen
+            )
+            ControlButton(
+                text = if (viewModel.isSystemActive) "Apagar" else "Encender",
+                icon = Icons.Default.PowerSettingsNew,
+                onClick = { viewModel.toggleSystem() },
+                color = if (viewModel.isSystemActive) ErrorRed else SuccessGreen
+            )
+            ControlButton(
+                text = "Test Buzzer",
+                icon = Icons.AutoMirrored.Filled.VolumeUp,
+                onClick = { viewModel.testBuzzer() },
+                color = PrimaryCyan
+            )
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // --- GRÁFICA EN TIEMPO REAL ---
-        Text("TELEMETRÍA EN TIEMPO REAL (TEMP)", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("TELEMETRÍA:", fontSize = 12.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(modifier = Modifier.width(8.dp))
+            ChartSelector(
+                selectedType = viewModel.selectedChartType,
+                onSelect = { viewModel.setChartType(it) }
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
         RealTimeGraph(
-            puntos = viewModel.listaPuntosGrafica,
+            puntos = when(viewModel.selectedChartType) {
+                "TEMP" -> viewModel.puntosTemp
+                "HUM" -> viewModel.puntosHum
+                "DIST" -> viewModel.puntosDist
+                else -> viewModel.puntosTemp
+            },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(140.dp)
+                .height(160.dp)
                 .clip(RoundedCornerShape(20.dp))
                 .background(SurfaceCard)
                 .border(1.dp, BorderColor, RoundedCornerShape(20.dp))
@@ -374,10 +468,10 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
             }
         ) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }) {
-                Text("HISTORIAL VIAJES", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("HISTORIAL", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }) {
-                Text("LOGS EN VIVO", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("LOGS VIVO", modifier = Modifier.padding(12.dp), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
         }
         
@@ -385,7 +479,7 @@ fun DashboardScreen(viewModel: SynCarViewModel, onLogout: () -> Unit) {
         
         Box(
             modifier = Modifier
-                .weight(1f)
+                .height(300.dp) // Altura fija dentro del scroll vertical general
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(SurfaceCard)
@@ -414,18 +508,18 @@ fun SensorCard(modifier: Modifier, title: String, value: String, unit: String, i
         Column(modifier = Modifier.padding(16.dp)) {
             Icon(icon, contentDescription = null, tint = if (isDataAvailable) color else TextSecondary, modifier = Modifier.size(24.dp))
             Spacer(modifier = Modifier.height(12.dp))
-            Text(title, fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+            Text(title, fontSize = 9.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     text = value,
-                    fontSize = if (isDataAvailable) 28.sp else 16.sp, // Ajuste dinámico de tamaño
+                    fontSize = if (isDataAvailable) 24.sp else 14.sp,
                     color = if (isDataAvailable) TextPrimary else TextSecondary.copy(alpha = 0.5f),
                     fontWeight = FontWeight.ExtraBold
                 )
                 if (isDataAvailable) {
                     Text(
                         text = " $unit",
-                        fontSize = 14.sp,
+                        fontSize = 12.sp,
                         color = TextSecondary,
                         modifier = Modifier.padding(bottom = 4.dp),
                         fontWeight = FontWeight.Bold
@@ -437,12 +531,79 @@ fun SensorCard(modifier: Modifier, title: String, value: String, unit: String, i
 }
 
 @Composable
+fun StatusCard(modifier: Modifier, title: String, isActive: Boolean, activeText: String, inactiveText: String, icon: ImageVector, activeColor: Color) {
+    Card(
+        modifier = modifier.shadow(elevation = 4.dp, shape = RoundedCornerShape(16.dp)),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        border = BorderStroke(1.dp, if (isActive) activeColor.copy(alpha = 0.3f) else BorderColor),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = if (isActive) activeColor else TextSecondary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(title, fontSize = 9.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = if (isActive) activeText else inactiveText,
+                fontSize = 14.sp,
+                color = if (isActive) activeColor else TextSecondary,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
+
+@Composable
+fun ControlButton(text: String, icon: ImageVector, onClick: () -> Unit, color: Color) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.height(40.dp),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.5f)),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = color),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+    ) {
+        Icon(icon, null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(text, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun ChartSelector(selectedType: String, onSelect: (String) -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceCard)
+            .border(1.dp, BorderColor, RoundedCornerShape(8.dp))
+    ) {
+        listOf("TEMP", "HUM", "DIST").forEach { type ->
+            Box(
+                modifier = Modifier
+                    .clickable { onSelect(type) }
+                    .background(if (selectedType == type) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = type,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selectedType == type) PrimaryCyan else TextSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun RealTimeGraph(puntos: List<Float>, modifier: Modifier) {
     Canvas(modifier = modifier) {
         if (puntos.size < 2) return@Canvas
         
         val maxVal = (puntos.maxOrNull() ?: 50f).coerceAtLeast(40f)
-        val minVal = (puntos.minOrNull() ?: 0f).coerceAtMost(10f)
+        val minVal = (puntos.minOrNull() ?: 0f).coerceAtMost(1f)
         val range = (maxVal - minVal).coerceAtLeast(1f)
         
         val width = size.width
@@ -457,7 +618,6 @@ fun RealTimeGraph(puntos: List<Float>, modifier: Modifier) {
             }
         }
         
-        // Efecto de brillo bajo la línea (opcional pero profesional)
         val fillPath = Path().apply {
             addPath(path)
             lineTo(width, height)
@@ -522,11 +682,9 @@ fun JourneyList(viewModel: SynCarViewModel) {
                                     Spacer(Modifier.width(12.dp))
                                     Icon(Icons.Default.Thermostat, null, tint = TextSecondary, modifier = Modifier.size(12.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    // Formateo manual para medias históricas
                                     Text("Med: %.1f°C".format(viaje.tempMedia), color = TextSecondary, fontSize = 12.sp)
                                 }
                             }
-                            // Badge de estado
                             Surface(
                                 color = colorEstado.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(8.dp)
@@ -576,7 +734,8 @@ fun LiveLogList(logs: List<String>) {
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Surface(
                             modifier = Modifier.size(28.dp),
                             color = PrimaryCyan.copy(alpha = 0.1f),
