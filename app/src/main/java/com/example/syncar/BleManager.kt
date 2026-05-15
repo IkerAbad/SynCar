@@ -29,7 +29,11 @@ class BleManager(
     private val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     fun startScan() {
+
         if (!hasPermissions()) return
+
+        stopScan()
+
         scanner?.startScan(scanCallback)
     }
 
@@ -38,7 +42,10 @@ class BleManager(
     }
 
     fun disconnect() {
-        if (hasPermissions()) bluetoothGatt?.close()
+        if (!hasPermissions()) return
+
+        bluetoothGatt?.disconnect()
+        bluetoothGatt?.close()
         bluetoothGatt = null
     }
 
@@ -85,8 +92,15 @@ class BleManager(
                 onStatusChanged("CONNECTED")
                 if (hasPermissions()) gatt.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+
                 onStatusChanged("DISCONNECTED")
-                startScan()
+
+                bluetoothGatt?.close()
+                bluetoothGatt = null
+
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    startScan()
+                }, 1500)
             }
         }
 
