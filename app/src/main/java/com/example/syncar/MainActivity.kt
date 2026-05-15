@@ -101,9 +101,9 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = DarkBg) {
                     when {
                         viewModel.isCreatingAdmin -> CreateAdminScreen(viewModel)
+                        viewModel.showUserManagement -> UserManagementScreen(viewModel)
                         !viewModel.isLoggedIn -> LoginScreen(viewModel)
                         viewModel.trayectoSeleccionado != null -> JourneyDetailScreen(viewModel)
-                        viewModel.showUserManagement -> UserManagementScreen(viewModel)
                         else -> DashboardScreen(viewModel)
                     }
                 }
@@ -122,10 +122,13 @@ class MainActivity : ComponentActivity() {
 
     private fun startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
-        val lr = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
+        val lr = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000).build()
         fusedLocationClient.requestLocationUpdates(lr, object : LocationCallback() {
             override fun onLocationResult(res: LocationResult) {
-                res.lastLocation?.let { viewModel.guardarGps(it.latitude, it.longitude) }
+                res.lastLocation?.let { 
+                    android.util.Log.d("SynCarGPS", "Update: ${it.latitude}, ${it.longitude}")
+                    viewModel.guardarGps(it.latitude, it.longitude) 
+                }
             }
         }, mainLooper)
     }
@@ -204,7 +207,8 @@ fun AlertPopup(visible: Boolean, message: String?, isCritical: Boolean, onDismis
             label = "alpha"
         )
 
-        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 40.dp).zIndex(100f)) {
+        // Movido un poco más abajo para no tapar los botones superiores
+        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 60.dp).zIndex(100f)) {
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(SurfaceCard.copy(alpha = 0.98f)),
@@ -255,7 +259,7 @@ fun DashboardScreen(vm: SynCarViewModel) {
                     }
                 }
                 Row {
-                    if (!vm.isGuest) {
+                    if (vm.isAdmin) {
                         IconButton(onClick = { vm.showUserManagement = true }, Modifier.background(SurfaceCard, CircleShape).border(1.dp, BorderColor, CircleShape).size(40.dp)) { Icon(Icons.Default.People, null, tint = TextSecondary, modifier = Modifier.size(18.dp)) }
                         Spacer(Modifier.width(8.dp))
                     }
@@ -301,10 +305,16 @@ fun DashboardScreen(vm: SynCarViewModel) {
                 Row(Modifier.fillMaxWidth().padding(20.dp), Arrangement.SpaceBetween, Alignment.CenterVertically) {
                     Column {
                         Text("SESIÓN DE TRAYECTO", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Text(if(vm.isJourneyActive) "REGISTRANDO..." else "LISTO PARA INICIAR", color = if(vm.isJourneyActive) SuccessGreen else TextPrimary, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                        Text(
+                            text = if (vm.isWaitingForFirstGps) "ESPERANDO GPS..." else if (vm.isJourneyActive) "REGISTRANDO..." else "LISTO PARA INICIAR",
+                            color = if (vm.isWaitingForFirstGps) WarningOrange else if (vm.isJourneyActive) SuccessGreen else TextPrimary,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
                     }
                     Button(
                         onClick = { if(vm.isJourneyActive) vm.finalizarTrayecto() else vm.iniciarTrayecto() },
+                        enabled = !vm.isWaitingForFirstGps || !vm.isJourneyActive, // Permitir iniciar siempre, pero no detener si esperamos el primer fix
                         colors = ButtonDefaults.buttonColors(if(vm.isJourneyActive) ErrorRed else SuccessGreen),
                         shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
@@ -351,13 +361,13 @@ fun JourneyDetailScreen(vm: SynCarViewModel) {
         Spacer(Modifier.height(24.dp))
         
         // Mapa con Polyline
-        Card(Modifier.fillMaxWidth().height(320.dp), shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, BorderColor)) {
+        Card(Modifier.fillMaxWidth().height(260.dp), shape = RoundedCornerShape(28.dp), border = BorderStroke(1.dp, BorderColor)) {
             if (vm.puntosGpsViaje.isEmpty()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(0.2f)), Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.Map, null, tint = TextSecondary, modifier = Modifier.size(48.dp))
                         Spacer(Modifier.height(12.dp))
-                        Text("Sin datos GPS disponibles", color = TextSecondary, fontWeight = FontWeight.Bold)
+                        Text("Trayecto demasiado corto para registrar GPS", color = TextSecondary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             } else {
@@ -377,19 +387,35 @@ fun JourneyDetailScreen(vm: SynCarViewModel) {
         }
         
         Spacer(Modifier.height(32.dp))
-        Text("ESTADÍSTICAS DEL VIAJE", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
-        Spacer(Modifier.height(16.dp))
-        
-        Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-            DetailCard(Modifier.weight(1f), "DURACIÓN", SynCarFormatter.formatDuration(t.duracion), Icons.Default.Timer)
-            DetailCard(Modifier.weight(1f), "TEMP MEDIA", "${SynCarFormatter.formatValue("TEMP", t.tempMedia)}°C", Icons.Default.Thermostat)
-        }
+        Text("TIEMPOS Y DURACIÓN", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-            DetailCard(Modifier.weight(1f), "DIST MÍNIMA", "${SynCarFormatter.formatValue("DIST", t.distMin)}cm", Icons.Default.Radar)
             DetailCard(Modifier.weight(1f), "INICIO", t.inicio.takeLast(8), Icons.Default.Schedule)
+            DetailCard(Modifier.weight(1f), "FIN", t.fin.takeLast(8), Icons.Default.EventAvailable)
+            DetailCard(Modifier.weight(1f), "DURACIÓN", SynCarFormatter.formatDuration(t.duracion), Icons.Default.Timer)
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("ESTADÍSTICAS DE TEMPERATURA", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
+            DetailCard(Modifier.weight(1f), "MÍNIMA", "${SynCarFormatter.formatValue("TEMP", t.stats.minTemp)}°C", Icons.Default.ArrowDownward)
+            DetailCard(Modifier.weight(1f), "MEDIA", "${SynCarFormatter.formatValue("TEMP", t.stats.avgTemp)}°C", Icons.Default.Thermostat)
+            DetailCard(Modifier.weight(1f), "MÁXIMA", "${SynCarFormatter.formatValue("TEMP", t.stats.maxTemp)}°C", Icons.Default.ArrowUpward)
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("ESTADÍSTICAS DE HUMEDAD", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
+            DetailCard(Modifier.weight(1f), "MÍNIMA", "${SynCarFormatter.formatValue("HUM", t.stats.minHum)}%", Icons.Default.ArrowDownward)
+            DetailCard(Modifier.weight(1f), "MEDIA", "${SynCarFormatter.formatValue("HUM", t.stats.avgHum)}%", Icons.Default.WaterDrop)
+            DetailCard(Modifier.weight(1f), "MÁXIMA", "${SynCarFormatter.formatValue("HUM", t.stats.maxHum)}%", Icons.Default.ArrowUpward)
         }
         
+        Spacer(Modifier.height(24.dp))
+        DetailCard(Modifier.fillMaxWidth(), "DISTANCIA MÍNIMA DETECTADA", "${SynCarFormatter.formatValue("DIST", t.stats.minDist)}cm", Icons.Default.Radar)
+
         Spacer(Modifier.height(32.dp))
         Text("TELEMETRÍA DEL TRAYECTO", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
         Spacer(Modifier.height(16.dp))
@@ -397,7 +423,7 @@ fun JourneyDetailScreen(vm: SynCarViewModel) {
         val safeTempViaje by remember { derivedStateOf { vm.puntosTempViaje.toList() } }
         val safeHumViaje by remember { derivedStateOf { vm.puntosHumViaje.toList() } }
 
-        Box(Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(20.dp)).background(SurfaceCard).padding(16.dp)) {
+        Box(Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(20.dp)).background(SurfaceCard).padding(16.dp)) {
             CombinedTelemetryGraph(safeTempViaje, safeHumViaje, Modifier.fillMaxSize())
         }
         Spacer(Modifier.height(32.dp))
@@ -410,34 +436,57 @@ fun UserManagementScreen(vm: SynCarViewModel) {
     var pass by remember { mutableStateOf("") }
     var editId by remember { mutableIntStateOf(-1) }
     val ctx = LocalContext.current
+    
     Column(Modifier.fillMaxSize().padding(16.dp).padding(top = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.showUserManagement = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = TextPrimary) }
-            Text("Usuarios", style = MaterialTheme.typography.headlineSmall, color = TextPrimary, fontWeight = FontWeight.Bold)
+            Text("Gestión de Usuarios", style = MaterialTheme.typography.headlineSmall, color = TextPrimary, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.height(24.dp))
+        
         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(SurfaceCard), border = BorderStroke(1.dp, BorderColor), shape = RoundedCornerShape(16.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text(if(editId == -1) "Nuevo Usuario" else "Editar Usuario", color = PrimaryCyan, fontWeight = FontWeight.Bold)
+                Text(if(editId == -1) "Añadir Nuevo Usuario" else "Editar Usuario", color = PrimaryCyan, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
-                SynCarTextField(user, { user = it }, "Nombre")
+                SynCarTextField(user, { user = it }, "Nombre de Usuario")
                 Spacer(Modifier.height(8.dp))
                 SynCarTextField(pass, { pass = it }, "Contraseña", true)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = {
-                    if (editId == -1) { if(vm.crearUsuario(user, pass)) { user=""; pass="" } }
-                    else { vm.editarUsuario(editId, user, pass.ifBlank { null }); user=""; pass=""; editId=-1 }
-                }, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(PrimaryCyan)) { Text(if(editId == -1) "AÑADIR" else "ACTUALIZAR") }
+                Button(
+                    onClick = {
+                        if (editId == -1) { 
+                            if(vm.crearUsuario(user, pass)) { 
+                                user=""; pass=""; 
+                                if (!vm.isLoggedIn) vm.showUserManagement = false 
+                            } else {
+                                Toast.makeText(ctx, "Datos inválidos o usuario duplicado", Toast.LENGTH_SHORT).show()
+                            }
+                        } else { 
+                            vm.editarUsuario(editId, user, pass.ifBlank { null }); 
+                            user=""; pass=""; editId=-1 
+                        }
+                    }, 
+                    Modifier.fillMaxWidth(), 
+                    colors = ButtonDefaults.buttonColors(PrimaryCyan)
+                ) { Text(if(editId == -1) "CREAR CUENTA" else "ACTUALIZAR") }
             }
         }
-        Spacer(Modifier.height(24.dp))
-        val users by remember { derivedStateOf { vm.listaUsuarios.toList() } }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(users) { u ->
-                UserCard(u, vm.usuarioActivo?.id == u.id, { vm.login(u.username, ""); vm.showUserManagement = false }, { editId = u.id; user = u.username }, {
-                    val err = vm.borrarUsuario(u.id)
-                    if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_SHORT).show()
-                })
+        
+        if (vm.isLoggedIn && vm.isAdmin) {
+            Spacer(Modifier.height(24.dp))
+            Text("Usuarios Registrados", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Spacer(Modifier.height(12.dp))
+            val users by remember { derivedStateOf { vm.listaUsuarios.toList() } }
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(users) { u ->
+                    UserCard(u, vm.usuarioActivo?.id == u.id, { 
+                        // Cambio rápido solo para admin
+                        vm.cambiarUsuarioAdmin(u)
+                    }, { editId = u.id; user = u.username }, {
+                        val err = vm.borrarUsuario(u.id)
+                        if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_SHORT).show()
+                    })
+                }
             }
         }
     }
@@ -515,8 +564,8 @@ fun CombinedTelemetryGraph(puntosTemp: List<Float>, puntosHum: List<Float>, modi
         Canvas(Modifier.fillMaxSize()) {
             if (puntosTemp.isEmpty() && puntosHum.isEmpty()) return@Canvas
             
-            val tempSnapshot = puntosTemp.takeLast(20)
-            val humSnapshot = puntosHum.takeLast(20)
+            val tempSnapshot = puntosTemp
+            val humSnapshot = puntosHum
 
             // Guías de fondo (sutiles)
             val guides = 4
@@ -527,8 +576,8 @@ fun CombinedTelemetryGraph(puntosTemp: List<Float>, puntosHum: List<Float>, modi
 
             // Dibujar Temperatura (Cyan)
             if (tempSnapshot.size >= 2) {
-                val maxT = 50f
-                val minT = 10f
+                val maxT = (tempSnapshot.maxOrNull() ?: 50f).coerceAtLeast(40f) + 5f
+                val minT = (tempSnapshot.minOrNull() ?: 10f).coerceAtMost(20f) - 5f
                 val rangeT = maxT - minT
                 val stepX = size.width / (tempSnapshot.size - 1).toFloat()
                 val path = Path().apply {
@@ -606,6 +655,9 @@ fun JourneyList(vm: SynCarViewModel) {
                                 Box(Modifier.size(6.dp).clip(CircleShape).background(colorPrioritario))
                             }
                             Text("${SynCarFormatter.formatDuration(v.duracion)} • ${SynCarFormatter.formatValue("TEMP", v.tempMedia)}°C • ${SynCarFormatter.formatValue("DIST", v.distMin)}cm", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                        }
+                        IconButton(onClick = { vm.borrarTrayecto(v.id) }) {
+                            Icon(Icons.Default.Delete, null, tint = ErrorRed.copy(0.7f), modifier = Modifier.size(20.dp))
                         }
                         Icon(Icons.Default.ChevronRight, null, tint = TextSecondary, modifier = Modifier.size(20.dp))
                     }

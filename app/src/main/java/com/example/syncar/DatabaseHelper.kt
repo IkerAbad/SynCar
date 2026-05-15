@@ -9,10 +9,10 @@ import android.database.sqlite.SQLiteOpenHelper
  * Versión 4: Añadimos tabla de ubicaciones para GPS.
  */
 class DatabaseHelper(context: Context) :
-    SQLiteOpenHelper(context, "syncar.db", null, 4) {
+    SQLiteOpenHelper(context, "syncar.db", null, 5) {
 
     override fun onCreate(db: SQLiteDatabase) {
-        // Tabla de Usuarios para el Login
+        // ... (Tablas anteriores permanecen por compatibilidad) ...
         db.execSQL("""
             CREATE TABLE usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,8 +20,6 @@ class DatabaseHelper(context: Context) :
                 password TEXT
             )
         """)
-
-        // Tabla de Sesiones (Trayectos)
         db.execSQL("""
             CREATE TABLE sesiones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,8 +32,6 @@ class DatabaseHelper(context: Context) :
                 FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
             )
         """)
-
-        // Tabla de Telemetría
         db.execSQL("""
             CREATE TABLE datos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,8 +42,6 @@ class DatabaseHelper(context: Context) :
                 FOREIGN KEY(sesion_id) REFERENCES sesiones(id)
             )
         """)
-
-        // Tabla de Ubicaciones GPS
         db.execSQL("""
             CREATE TABLE ubicaciones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,18 +52,36 @@ class DatabaseHelper(context: Context) :
                 FOREIGN KEY(sesion_id) REFERENCES sesiones(id)
             )
         """)
+
+        // NUEVA TABLA: Snapshots históricos reales
+        db.execSQL("""
+            CREATE TABLE trip_sensor_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                viaje_id INTEGER,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                temperatura REAL,
+                humedad REAL,
+                distancia REAL,
+                latitud REAL,
+                longitud REAL,
+                FOREIGN KEY(viaje_id) REFERENCES sesiones(id)
+            )
+        """)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 4) {
+        if (oldVersion < 5) {
             db.execSQL("""
-                CREATE TABLE IF NOT EXISTS ubicaciones (
+                CREATE TABLE IF NOT EXISTS trip_sensor_data (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sesion_id INTEGER,
+                    viaje_id INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    temperatura REAL,
+                    humedad REAL,
+                    distancia REAL,
                     latitud REAL,
                     longitud REAL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(sesion_id) REFERENCES sesiones(id)
+                    FOREIGN KEY(viaje_id) REFERENCES sesiones(id)
                 )
             """)
         }
