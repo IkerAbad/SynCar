@@ -1,8 +1,13 @@
 package com.example.syncar
 
 import android.content.ContentValues
+import android.util.Base64
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.*
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 /**
  * Repositorio: Encapsula toda la lógica de acceso a datos (SQLite).
@@ -11,15 +16,43 @@ class SynCarRepository(private val dbHelper: DatabaseHelper) {
 
     fun login(user: String, pass: String): Usuario? {
         val db = dbHelper.readableDatabase
-        val cursor = db.rawQuery("SELECT id, username FROM usuarios WHERE username=? AND password=?", arrayOf(user, pass))
-        return if (cursor.moveToFirst()) {
-            val usuario = Usuario(cursor.getInt(0), cursor.getString(1))
-            cursor.close()
-            usuario
-        } else {
-            cursor.close()
-            null
+        val cursor = db.rawQuery("SELECT id, username, password FROM usuarios WHERE username=?", arrayOf(user))
+        var usuario: Usuario? = null
+        var guardada: String? = null
+        if (cursor.moveToFirst() && verificarPassword(pass, cursor.getString(2) ?: "")) {
+            usuario = Usuario(cursor.getInt(0), cursor.getString(1))
+            guardada = cursor.getString(2)
         }
+        cursor.close()
+        // Las contraseñas antiguas se guardaron sin cifrar: se pasan a hash en el primer acceso correcto
+        if (usuario != null && guardada != null && !guardada.contains(":")) {
+            actualizarUsuario(usuario.id, usuario.username, pass)
+        }
+        return usuario
+    }
+
+    private fun hashPassword(pass: String): String {
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        return Base64.encodeToString(salt, Base64.NO_WRAP) + ":" + Base64.encodeToString(derivar(pass, salt), Base64.NO_WRAP)
+    }
+
+    private fun derivar(pass: String, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(pass.toCharArray(), salt, 60000, 256)
+        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA1").generateSecret(spec).encoded
+    }
+
+    private fun verificarPassword(pass: String, guardada: String): Boolean {
+        val partes = guardada.split(":")
+        if (partes.size == 2) {
+            try {
+                val salt = Base64.decode(partes[0], Base64.NO_WRAP)
+                val esperado = Base64.decode(partes[1], Base64.NO_WRAP)
+                return MessageDigest.isEqual(derivar(pass, salt), esperado)
+            } catch (e: IllegalArgumentException) {
+                // no es un hash: contraseña antigua que contiene ':'
+            }
+        }
+        return pass == guardada
     }
 
     fun obtenerUsuarios(): List<Usuario> {
@@ -37,7 +70,7 @@ class SynCarRepository(private val dbHelper: DatabaseHelper) {
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {
             put("username", username)
-            put("password", pass)
+            put("password", hashPassword(pass))
         }
         return db.insert("usuarios", null, values)
     }
@@ -46,7 +79,7 @@ class SynCarRepository(private val dbHelper: DatabaseHelper) {
         val db = dbHelper.writableDatabase
         val values = ContentValues().apply {
             put("username", username)
-            if (pass != null) put("password", pass)
+            if (pass != null) put("password", hashPassword(pass))
         }
         db.update("usuarios", values, "id=?", arrayOf(id.toString()))
     }
